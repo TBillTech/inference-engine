@@ -6,6 +6,7 @@ Tests for the generalized architecture rename:
 * ``ResolutionProvider`` / ``ResolutionRequest`` / ``ResolutionResult``
   (were ``InferenceProvider`` / ``InferenceRequest`` / ``InferenceResponse``)
 * ``ResolutionPass`` (was ``InferencePass``)
+* ``ResolutionStrategy`` / ``PromptStrategy`` (new strategy abstraction)
 
 Backward-compatibility aliases are also checked.
 """
@@ -29,6 +30,7 @@ from context_compiler.inference.provider import (
     InferenceRequest,
     InferenceResponse,
 )
+from context_compiler.inference.strategy import ResolutionStrategy, PromptStrategy
 from context_compiler.inference.mock_provider import MockProvider
 from context_compiler.compiler.passes import ResolutionPass, InferencePass
 from context_compiler.compiler.compiler import Compiler
@@ -300,6 +302,102 @@ class TestResolutionProvider:
 
 
 # ---------------------------------------------------------------------------
+# ResolutionStrategy and PromptStrategy
+# ---------------------------------------------------------------------------
+
+
+class TestResolutionStrategy:
+    def test_resolve_raises_not_implemented(self):
+        s = ResolutionStrategy()
+        with pytest.raises(NotImplementedError, match="resolve"):
+            s.resolve(ResolutionRequest(prompt="x"))
+
+    def test_can_apply_defaults_to_true(self):
+        s = ResolutionStrategy()
+        assert s.can_apply(ResolutionRequest(prompt="anything")) is True
+
+    def test_can_apply_can_be_overridden(self):
+        class MathStrategy(ResolutionStrategy):
+            name = "math"
+
+            def resolve(self, request):
+                return ResolutionResult(data={})
+
+            def can_apply(self, request):
+                return request.metadata.get("domain") == "math"
+
+        s = MathStrategy()
+        assert s.can_apply(ResolutionRequest(metadata={"domain": "math"})) is True
+        assert s.can_apply(ResolutionRequest(metadata={"domain": "text"})) is False
+
+    def test_provider_defaults_to_none(self):
+        s = ResolutionStrategy()
+        assert s.provider is None
+
+    def test_repr_includes_name(self):
+        s = ResolutionStrategy()
+        assert "abstract" in repr(s)
+
+
+class TestPromptStrategy:
+    def test_delegates_to_provider(self):
+        provider = MockProvider(responses={"hello": {"result": "world"}})
+        strategy = PromptStrategy(provider)
+        request = ResolutionRequest(prompt="hello")
+        result = strategy.resolve(request)
+        assert result.data == {"result": "world"}
+        assert provider.call_count == 1
+
+    def test_provider_property_returns_wrapped_provider(self):
+        provider = MockProvider()
+        strategy = PromptStrategy(provider)
+        assert strategy.provider is provider
+
+    def test_can_apply_defaults_to_true(self):
+        provider = MockProvider()
+        strategy = PromptStrategy(provider)
+        assert strategy.can_apply(ResolutionRequest(prompt="x")) is True
+
+    def test_repr_includes_provider(self):
+        provider = MockProvider()
+        strategy = PromptStrategy(provider)
+        assert "PromptStrategy" in repr(strategy)
+        assert "MockProvider" in repr(strategy)
+
+    def test_name_is_prompt(self):
+        provider = MockProvider()
+        strategy = PromptStrategy(provider)
+        assert strategy.name == "prompt"
+
+    def test_multiple_providers_same_strategy(self):
+        """The same PromptStrategy interface works with different providers."""
+
+        class RecordingProvider(ResolutionProvider):
+            name = "recording"
+
+            def __init__(self, tag: str) -> None:
+                self.tag = tag
+                self.called = False
+
+            def resolve(self, request):
+                self.called = True
+                return ResolutionResult(data={"tag": self.tag}, provider=self.name)
+
+        p1 = RecordingProvider("alpha")
+        p2 = RecordingProvider("beta")
+
+        s1 = PromptStrategy(p1)
+        s2 = PromptStrategy(p2)
+
+        r1 = s1.resolve(ResolutionRequest(prompt="x"))
+        r2 = s2.resolve(ResolutionRequest(prompt="x"))
+
+        assert p1.called and p2.called
+        assert r1.data["tag"] == "alpha"
+        assert r2.data["tag"] == "beta"
+
+
+# ---------------------------------------------------------------------------
 # ResolutionPass / InferencePass alias
 # ---------------------------------------------------------------------------
 
@@ -315,6 +413,41 @@ class TestResolutionPass:
         ip = InferencePass(provider)
         assert isinstance(ip, ResolutionPass)
         assert ip.provider is provider
+
+    def test_resolution_pass_wraps_provider_in_prompt_strategy(self):
+        """A bare provider is automatically wrapped in a PromptStrategy."""
+        provider = MockProvider()
+        rp = ResolutionPass(provider)
+        assert isinstance(rp.strategy, PromptStrategy)
+        assert rp.strategy.provider is provider
+
+    def test_resolution_pass_accepts_strategy_directly(self):
+        provider = MockProvider()
+        strategy = PromptStrategy(provider)
+        rp = ResolutionPass(strategy)
+        assert rp.strategy is strategy
+
+    def test_resolution_pass_strategy_property(self):
+        provider = MockProvider()
+        rp = ResolutionPass(provider)
+        assert rp.strategy is not None
+
+    def test_resolution_pass_provider_raises_for_no_provider_strategy(self):
+        """Accessing .provider on a strategy without one raises AttributeError."""
+
+        class NoProviderStrategy(ResolutionStrategy):
+            name = "no-provider"
+
+            def resolve(self, request):
+                return ResolutionResult(data={})
+
+        rp = ResolutionPass(NoProviderStrategy())
+        with pytest.raises(AttributeError, match="provider"):
+            _ = rp.provider
+
+    def test_resolution_pass_rejects_invalid_type(self):
+        with pytest.raises(TypeError):
+            ResolutionPass("not-a-strategy-or-provider")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -365,3 +498,61 @@ class TestEndToEnd:
         compiler.compile_node(node, Path("target"), root)
         assert provider.last_request is not None
         assert provider.last_request.query_path == Path("target")
+
+    def test_compile_with_explicit_prompt_strategy(self):
+        """Passing a PromptStrategy directly to ResolutionPass works end-to-end."""
+        registry = TemplateRegistry()
+        registry.register(Template(name="tmpl", template_str="Resolve: {x}"))
+        provider = MockProvider(responses={"Resolve: hello": {"result": "world"}})
+        strategy = PromptStrategy(provider)
+        compiler = Compiler(
+            template_registry=registry,
+            passes=[ResolutionPass(strategy)],
+        )
+        node = ResolvableNode(
+            template_ref="tmpl",
+            input_bindings={"x": Path("data", "x")},
+        )
+        root = MappingNode({
+            "data": MappingNode({"x": ScalarNode("hello")}),
+            "target": node,
+        })
+        compiled = compiler.compile_node(node, Path("target"), root)
+        assert compiled.resolution_state is ResolvableNodeState.RESOLVED
+        assert provider.call_count == 1
+
+    def test_custom_strategy_is_called_by_compiler(self):
+        """A custom ResolutionStrategy is invoked by the compiler."""
+        registry = TemplateRegistry()
+        registry.register(Template(name="tmpl", template_str="Resolve: {x}"))
+
+        class UpperCaseStrategy(ResolutionStrategy):
+            """Transforms the prompt to upper-case and returns it as data."""
+
+            name = "uppercase"
+            calls: list = []
+
+            def resolve(self, request):
+                self.calls.append(request)
+                return ResolutionResult(
+                    data={"result": (request.prompt or "").upper()},
+                    provider="uppercase",
+                )
+
+        custom_strategy = UpperCaseStrategy()
+        compiler = Compiler(
+            template_registry=registry,
+            passes=[ResolutionPass(custom_strategy)],
+        )
+        node = ResolvableNode(
+            template_ref="tmpl",
+            input_bindings={"x": Path("data", "x")},
+        )
+        root = MappingNode({
+            "data": MappingNode({"x": ScalarNode("hello")}),
+            "target": node,
+        })
+        compiled = compiler.compile_node(node, Path("target"), root)
+        assert compiled.resolution_state is ResolvableNodeState.RESOLVED
+        assert len(custom_strategy.calls) == 1
+        assert custom_strategy.calls[0].prompt == "Resolve: hello"

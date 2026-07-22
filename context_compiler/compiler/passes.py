@@ -11,7 +11,7 @@ testable way.  Each pass should:
 Pass types
 ----------
 * :class:`DeterministicPass` – rule-based normalization / constraint passes.
-* :class:`ResolutionPass` – drives provider resolution for unresolved
+* :class:`ResolutionPass` – drives strategy-based resolution for unresolved
   :class:`~context_compiler.ast.prompt_node.ResolvableNode` instances.
 
 Custom passes should subclass one of these and implement :meth:`run`.
@@ -19,6 +19,11 @@ Custom passes should subclass one of these and implement :meth:`run`.
 Backward Compatibility
 ----------------------
 ``InferencePass`` is kept as an alias for :class:`ResolutionPass`.
+
+When a bare :class:`~context_compiler.inference.provider.ResolutionProvider`
+is passed to :class:`ResolutionPass`, it is automatically wrapped in a
+:class:`~context_compiler.inference.strategy.PromptStrategy` so that existing
+call sites continue to work without modification.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ if TYPE_CHECKING:
     from context_compiler.ast.paths import Path
     from context_compiler.ast.prompt_node import ResolvableNode
     from context_compiler.inference.provider import ResolutionProvider
+    from context_compiler.inference.strategy import ResolutionStrategy
 
 
 class PassContext:
@@ -110,27 +116,63 @@ class ResolutionPass(CompilerPass):
     """
     A compiler pass that resolves unresolved
     :class:`~context_compiler.ast.prompt_node.ResolvableNode` instances using a
-    :class:`~context_compiler.inference.provider.ResolutionProvider`.
+    :class:`~context_compiler.inference.strategy.ResolutionStrategy`.
 
-    The compiler is provider-agnostic: any
-    :class:`~context_compiler.inference.provider.ResolutionProvider`
-    implementation can be used (LLM, database, constraint solver, etc.).
+    The compiler is strategy-agnostic: any
+    :class:`~context_compiler.inference.strategy.ResolutionStrategy`
+    implementation can be used (LLM prompt, Prolog query, database lookup, etc.).
 
     Parameters
     ----------
-    provider:
-        The resolution provider to use.
+    strategy_or_provider:
+        Either a :class:`~context_compiler.inference.strategy.ResolutionStrategy`
+        or a :class:`~context_compiler.inference.provider.ResolutionProvider`.
+        When a bare provider is given it is automatically wrapped in a
+        :class:`~context_compiler.inference.strategy.PromptStrategy` for
+        backward compatibility.
     """
 
     name: str = "resolution-pass"
 
-    def __init__(self, provider: "ResolutionProvider") -> None:
-        self._provider = provider
+    def __init__(
+        self,
+        strategy_or_provider: "ResolutionStrategy | ResolutionProvider",
+    ) -> None:
+        from context_compiler.inference.strategy import ResolutionStrategy, PromptStrategy
+        from context_compiler.inference.provider import ResolutionProvider
+
+        if isinstance(strategy_or_provider, ResolutionStrategy):
+            self._strategy: "ResolutionStrategy" = strategy_or_provider
+        elif isinstance(strategy_or_provider, ResolutionProvider):
+            # Backward compat: wrap a bare provider in the default PromptStrategy.
+            self._strategy = PromptStrategy(strategy_or_provider)
+        else:
+            raise TypeError(
+                "ResolutionPass expects a ResolutionStrategy or ResolutionProvider; "
+                f"got {type(strategy_or_provider).__name__}"
+            )
+
+    @property
+    def strategy(self) -> "ResolutionStrategy":
+        """The configured resolution strategy."""
+        return self._strategy
 
     @property
     def provider(self) -> "ResolutionProvider":
-        """The configured resolution provider."""
-        return self._provider
+        """
+        The resolution provider exposed by the configured strategy.
+
+        This is a backward-compatible accessor.  It returns
+        ``self.strategy.provider`` and raises :exc:`AttributeError` if the
+        strategy does not expose a single provider.
+        """
+        p = self._strategy.provider
+        if p is None:
+            raise AttributeError(
+                f"{type(self._strategy).__name__} does not expose a single provider; "
+                "use ResolutionPass.strategy instead."
+            )
+        return p
 
 
 #: Backward-compatible alias for :class:`ResolutionPass`.

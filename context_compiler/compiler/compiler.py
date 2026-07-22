@@ -10,8 +10,9 @@ demanded by a :meth:`~context_compiler.context.context.Context.query` call.
 It never eagerly traverses the entire tree.
 
 The compiler depends **only** on the
-:class:`~context_compiler.inference.provider.ResolutionProvider` interface.
-It has no knowledge of LLMs, prompts, or any specific resolution strategy.
+:class:`~context_compiler.inference.strategy.ResolutionStrategy` interface
+(via :class:`~context_compiler.compiler.passes.ResolutionPass`).
+It has no knowledge of LLMs, prompts, or any specific resolution provider.
 
 Compilation algorithm (per query)
 ----------------------------------
@@ -25,7 +26,7 @@ Compilation algorithm (per query)
 
       * Resolve all dependency paths (recursively, via query).
       * Build the resolution request from the template and bindings.
-      * Call the :class:`~context_compiler.inference.provider.ResolutionProvider`.
+      * Call the :class:`~context_compiler.inference.strategy.ResolutionStrategy`.
       * Decode the response into typed nodes.
       * Validate the decoded nodes against the output schema.
       * Mark the ResolvableNode as ``RESOLVED`` and cache its result.
@@ -58,9 +59,10 @@ class Compiler:
     """
     The demand-driven, incremental context compiler.
 
-    The compiler is provider-agnostic: it depends only on the
-    :class:`~context_compiler.inference.provider.ResolutionProvider` interface
-    and never imports any concrete provider implementation.
+    The compiler is strategy-agnostic: it depends only on the
+    :class:`~context_compiler.inference.strategy.ResolutionStrategy` interface
+    (via :class:`~context_compiler.compiler.passes.ResolutionPass`) and never
+    imports any concrete provider or strategy implementation.
 
     Parameters
     ----------
@@ -171,7 +173,7 @@ class Compiler:
                 f"No ResolutionPass configured; cannot resolve ResolvableNode at {path}"
             )
 
-        provider = resolution_pass.provider
+        strategy = resolution_pass.strategy
 
         # Resolve dependencies.
         bound_values: dict[str, Any] = {}
@@ -213,9 +215,9 @@ class Compiler:
             dependencies=node.effective_dependencies(),
         )
 
-        # Call the provider.
+        # Call the strategy (which delegates to a provider).
         try:
-            result: ResolutionResult = provider.resolve(request)
+            result: ResolutionResult = strategy.resolve(request)
         except Exception as exc:
             node.mark_error(exc)
             raise CompilationError(
