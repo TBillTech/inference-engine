@@ -287,7 +287,11 @@ class ResolvableNode(Node):
             metadata=data.get("metadata"),
         )
         # Accept both "resolution_state" (new) and "prompt_state" (legacy) keys.
-        state_key = data.get("resolution_state") or data.get("prompt_state", "PENDING")
+        state_key = (
+            data["resolution_state"]
+            if "resolution_state" in data
+            else data.get("prompt_state", "PENDING")
+        )
         node._resolution_state = ResolvableNodeState[state_key]
         if data.get("result") is not None:
             node._result = _node_from_dict(data["result"])
@@ -313,10 +317,7 @@ PromptNode = ResolvableNode
 # Register ResolvableNode in the polymorphic node registry.
 # Also register the legacy "PromptNode" type name so that old serialised
 # data can still be deserialised.
-from context_compiler.ast.nodes import register_node_type
+from context_compiler.ast.nodes import register_node_type, register_node_type_alias
 
 register_node_type(ResolvableNode)
-# Map the old serialisation key "PromptNode" to the same class.
-from context_compiler.ast.nodes import _NODE_REGISTRY
-
-_NODE_REGISTRY["PromptNode"] = ResolvableNode
+register_node_type_alias("PromptNode", ResolvableNode)

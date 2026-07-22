@@ -64,8 +64,8 @@ class ResolutionRequest:
 
     prompt: str | list[dict[str, str]] | None = None
     output_schema: dict[str, Any] | None = None
-    query_path: Any | None = None  # Path at runtime; Any avoids circular import
-    dependencies: list[Any] = field(default_factory=list)
+    query_path: Path | None = None
+    dependencies: list[Path] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     model: str | None = None
     temperature: float = 0.0

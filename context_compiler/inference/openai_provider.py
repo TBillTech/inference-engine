@@ -72,7 +72,16 @@ class OpenAIProvider(ResolutionProvider):
 
         When *request.output_schema* is provided and the chosen model supports
         JSON mode, the schema is passed as a response format constraint.
+
+        Raises
+        ------
+        ValueError
+            If *request.prompt* is ``None`` (OpenAI requires a prompt).
         """
+        if request.prompt is None:
+            raise ValueError(
+                "OpenAIProvider requires a non-None prompt in the ResolutionRequest."
+            )
         client = self._get_client()
         model = request.model or self._model
 
@@ -80,7 +89,7 @@ class OpenAIProvider(ResolutionProvider):
         if isinstance(request.prompt, list):
             messages = request.prompt
         else:
-            messages = [{"role": "user", "content": request.prompt or ""}]
+            messages = [{"role": "user", "content": request.prompt}]
 
         kwargs: dict[str, Any] = {
             "model": model,
