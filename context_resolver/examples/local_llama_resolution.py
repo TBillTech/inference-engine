@@ -122,7 +122,8 @@ def build_example_context(
     registry.register(Template(
         name="greet",
         template_str=(
-            "{name} is a hero in {setting}. "
+            "You are narrator for a story in {setting}. "
+            "The heroes name is {name}."
             "Respond with a JSON object containing exactly two keys: "
             '"greeting" (a short welcome) and "opening" (a scene-setting line).'
         ),
