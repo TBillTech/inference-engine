@@ -1,9 +1,9 @@
-"""Tests for context_compiler.ast.nodes."""
+"""Tests for context_resolver.ast.nodes."""
 
 import json
 import pytest
 
-from context_compiler.ast.nodes import (
+from context_resolver.ast.nodes import (
     NodeState,
     ScalarNode,
     MappingNode,

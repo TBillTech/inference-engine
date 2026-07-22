@@ -1,8 +1,8 @@
-"""Tests for context_compiler.ast.paths."""
+"""Tests for context_resolver.ast.paths."""
 
 import pytest
 
-from context_compiler.ast.paths import Path
+from context_resolver.ast.paths import Path
 
 
 class TestPath:

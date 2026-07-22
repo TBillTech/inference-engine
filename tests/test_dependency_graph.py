@@ -1,9 +1,9 @@
-"""Tests for context_compiler.query.dependency_graph."""
+"""Tests for context_resolver.query.dependency_graph."""
 
 import pytest
 
-from context_compiler.ast.paths import Path
-from context_compiler.query.dependency_graph import DependencyGraph, CycleError
+from context_resolver.ast.paths import Path
+from context_resolver.query.dependency_graph import DependencyGraph, CycleError
 
 
 @pytest.fixture

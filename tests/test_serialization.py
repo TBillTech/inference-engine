@@ -3,10 +3,10 @@
 import json
 import pytest
 
-from context_compiler.ast.nodes import MappingNode, ScalarNode, SequenceNode
-from context_compiler.ast.paths import Path
-from context_compiler.serialization.serializer import Serializer
-from context_compiler.serialization.diff import diff_contexts, ContextDiff
+from context_resolver.ast.nodes import MappingNode, ScalarNode, SequenceNode
+from context_resolver.ast.paths import Path
+from context_resolver.serialization.serializer import Serializer
+from context_resolver.serialization.diff import diff_contexts, ContextDiff
 
 
 # ---------------------------------------------------------------------------

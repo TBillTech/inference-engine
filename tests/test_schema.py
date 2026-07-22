@@ -1,8 +1,8 @@
-"""Tests for context_compiler.ast.schema."""
+"""Tests for context_resolver.ast.schema."""
 
 import pytest
 
-from context_compiler.ast.schema import Schema, FieldSpec, SchemaValidationError
+from context_resolver.ast.schema import Schema, FieldSpec, SchemaValidationError
 
 
 @pytest.fixture

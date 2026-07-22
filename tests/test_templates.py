@@ -1,8 +1,8 @@
-"""Tests for context_compiler.templates.template."""
+"""Tests for context_resolver.templates.template."""
 
 import pytest
 
-from context_compiler.templates.template import Template, TemplateRegistry
+from context_resolver.templates.template import Template, TemplateRegistry
 
 
 class TestTemplate:

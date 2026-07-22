@@ -1,1 +1,1 @@
-"""Test package for context_compiler."""
+"""Test package for context_resolver."""

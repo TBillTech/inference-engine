@@ -1,9 +1,9 @@
-"""Tests for context_compiler.inference.mock_provider."""
+"""Tests for context_resolver.inference.mock_provider."""
 
 import pytest
 
-from context_compiler.inference.mock_provider import MockProvider
-from context_compiler.inference.provider import ResolutionRequest, ResolutionResult
+from context_resolver.inference.mock_provider import MockProvider
+from context_resolver.inference.provider import ResolutionRequest, ResolutionResult
 
 
 @pytest.fixture

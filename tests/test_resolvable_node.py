@@ -10,23 +10,23 @@ Tests for the query-resolution architecture:
 
 import pytest
 
-from context_compiler.ast.nodes import ScalarNode, MappingNode, NodeState
-from context_compiler.ast.paths import Path
-from context_compiler.ast.resolvable_node import (
+from context_resolver.ast.nodes import ScalarNode, MappingNode, NodeState
+from context_resolver.ast.paths import Path
+from context_resolver.ast.resolvable_node import (
     ResolvableNode,
     ResolvableNodeState,
 )
-from context_compiler.ast.schema import Schema, FieldSpec
-from context_compiler.inference.provider import (
+from context_resolver.ast.schema import Schema, FieldSpec
+from context_resolver.inference.provider import (
     ResolutionProvider,
     ResolutionRequest,
     ResolutionResult,
 )
-from context_compiler.inference.strategy import ResolutionStrategy, PromptStrategy
-from context_compiler.inference.mock_provider import MockProvider
-from context_compiler.query.passes import ResolutionPass
-from context_compiler.query.resolver import Resolver
-from context_compiler.templates.template import Template, TemplateRegistry
+from context_resolver.inference.strategy import ResolutionStrategy, PromptStrategy
+from context_resolver.inference.mock_provider import MockProvider
+from context_resolver.query.passes import ResolutionPass
+from context_resolver.query.resolver import Resolver
+from context_resolver.templates.template import Template, TemplateRegistry
 
 
 # ---------------------------------------------------------------------------

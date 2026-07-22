@@ -1,16 +1,16 @@
-"""Tests for context_compiler.context.context.Context."""
+"""Tests for context_resolver.context.context.Context."""
 
 import pytest
 
-from context_compiler.ast.nodes import MappingNode, ScalarNode, SequenceNode
-from context_compiler.ast.paths import Path
-from context_compiler.ast.resolvable_node import ResolvableNode, ResolvableNodeState
-from context_compiler.ast.schema import Schema, FieldSpec
-from context_compiler.query.resolver import Resolver
-from context_compiler.query.passes import ResolutionPass
-from context_compiler.context.context import Context, NodeNotFoundError
-from context_compiler.inference.mock_provider import MockProvider
-from context_compiler.templates.template import Template, TemplateRegistry
+from context_resolver.ast.nodes import MappingNode, ScalarNode, SequenceNode
+from context_resolver.ast.paths import Path
+from context_resolver.ast.resolvable_node import ResolvableNode, ResolvableNodeState
+from context_resolver.ast.schema import Schema, FieldSpec
+from context_resolver.query.resolver import Resolver
+from context_resolver.query.passes import ResolutionPass
+from context_resolver.context.context import Context, NodeNotFoundError
+from context_resolver.inference.mock_provider import MockProvider
+from context_resolver.templates.template import Template, TemplateRegistry
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +160,7 @@ class TestContextResolvableNode:
         # Inspect the node in the tree directly without re-querying,
         # because querying would trigger re-resolution (which would
         # fail since the mock has no canned response for "Frank").
-        from context_compiler.query.resolver import _resolve_path
+        from context_resolver.query.resolver import _resolve_path
 
         greeting_node = _resolve_path(resolvable_context.root, Path("greeting"))
         assert isinstance(greeting_node, ResolvableNode)

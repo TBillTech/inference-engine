@@ -1,11 +1,11 @@
-"""Tests for context_compiler.ast.resolvable_node."""
+"""Tests for context_resolver.ast.resolvable_node."""
 
 import pytest
 
-from context_compiler.ast.nodes import ScalarNode, MappingNode, NodeState
-from context_compiler.ast.paths import Path
-from context_compiler.ast.resolvable_node import ResolvableNode, ResolvableNodeState
-from context_compiler.ast.schema import Schema, FieldSpec
+from context_resolver.ast.nodes import ScalarNode, MappingNode, NodeState
+from context_resolver.ast.paths import Path
+from context_resolver.ast.resolvable_node import ResolvableNode, ResolvableNodeState
+from context_resolver.ast.schema import Schema, FieldSpec
 
 
 @pytest.fixture
