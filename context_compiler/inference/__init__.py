@@ -1,4 +1,4 @@
-"""Resolution sub-package: provider interface and concrete implementations."""
+"""Resolution sub-package: provider interface, strategy interface, and concrete implementations."""
 
 from context_compiler.inference.provider import (
     ResolutionProvider,
@@ -9,6 +9,7 @@ from context_compiler.inference.provider import (
     InferenceRequest,
     InferenceResponse,
 )
+from context_compiler.inference.strategy import ResolutionStrategy, PromptStrategy
 from context_compiler.inference.mock_provider import MockProvider
 
 __all__ = [
@@ -20,4 +21,6 @@ __all__ = [
     "InferenceRequest",
     "InferenceResponse",
     "MockProvider",
+    "ResolutionStrategy",
+    "PromptStrategy",
 ]
