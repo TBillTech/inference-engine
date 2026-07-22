@@ -1,9 +1,9 @@
 """
-OpenAI inference provider stub.
+OpenAI resolution provider stub.
 
-This module provides a :class:`OpenAIProvider` that wraps the OpenAI Python
+This module provides an :class:`OpenAIProvider` that wraps the OpenAI Python
 SDK.  It is intentionally left as a stub so that the ``openai`` package is not
-a required dependency; install it separately if you need live inference.
+a required dependency; install it separately if you need live resolution.
 
 To use this provider::
 
@@ -16,15 +16,15 @@ from __future__ import annotations
 from typing import Any
 
 from context_compiler.inference.provider import (
-    InferenceProvider,
-    InferenceRequest,
-    InferenceResponse,
+    ResolutionProvider,
+    ResolutionRequest,
+    ResolutionResult,
 )
 
 
-class OpenAIProvider(InferenceProvider):
+class OpenAIProvider(ResolutionProvider):
     """
-    Inference provider backed by the OpenAI Chat Completions API.
+    Resolution provider backed by the OpenAI Chat Completions API.
 
     Parameters
     ----------
@@ -48,7 +48,7 @@ class OpenAIProvider(InferenceProvider):
         self._api_key = api_key
         self._model = model
         self._organization = organization
-        self._client: Any = None  # Lazy-initialized on first infer() call
+        self._client: Any = None  # Lazy-initialized on first resolve() call
 
     def _get_client(self) -> Any:
         """Lazily initialise and return the OpenAI client."""
@@ -66,13 +66,22 @@ class OpenAIProvider(InferenceProvider):
             )
         return self._client
 
-    def infer(self, request: InferenceRequest) -> InferenceResponse:
+    def resolve(self, request: ResolutionRequest) -> ResolutionResult:
         """
-        Call the OpenAI Chat Completions API and return a structured response.
+        Call the OpenAI Chat Completions API and return a structured result.
 
         When *request.output_schema* is provided and the chosen model supports
         JSON mode, the schema is passed as a response format constraint.
+
+        Raises
+        ------
+        ValueError
+            If *request.prompt* is ``None`` (OpenAI requires a prompt).
         """
+        if request.prompt is None:
+            raise ValueError(
+                "OpenAIProvider requires a non-None prompt in the ResolutionRequest."
+            )
         client = self._get_client()
         model = request.model or self._model
 
@@ -103,7 +112,7 @@ class OpenAIProvider(InferenceProvider):
                 f"OpenAI response was not valid JSON: {content!r}"
             ) from exc
 
-        return InferenceResponse(
+        return ResolutionResult(
             data=data,
             model=response.model,
             provider=self.name,

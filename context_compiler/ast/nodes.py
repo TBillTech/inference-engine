@@ -354,6 +354,24 @@ def register_node_type(node_cls: type[Node]) -> type[Node]:
     return node_cls
 
 
+def register_node_type_alias(alias: str, node_cls: type[Node]) -> None:
+    """
+    Register *alias* as an additional deserialization key for *node_cls*.
+
+    This is used to maintain backward compatibility when a node class is
+    renamed: old serialised data using the previous type name can still be
+    deserialised by the new class.
+
+    Parameters
+    ----------
+    alias:
+        The legacy ``"type"`` field value to map to *node_cls*.
+    node_cls:
+        The class that should handle deserialization for *alias*.
+    """
+    _NODE_REGISTRY[alias] = node_cls
+
+
 def _node_from_dict(data: dict[str, Any]) -> Node:
     """Deserialize a node from a dictionary, dispatching on the ``type`` field."""
     type_name: str = data.get("type", "")
