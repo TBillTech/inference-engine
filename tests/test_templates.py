@@ -2,7 +2,8 @@
 
 import pytest
 
-from context_resolver.templates.template import Template, TemplateRegistry
+from context_resolver.templates.template import Template, TemplateRegistry, JSONOutputTemplate
+from context_resolver.ast.schema import Schema, FieldSpec
 
 
 class TestTemplate:
@@ -59,3 +60,93 @@ class TestTemplateRegistry:
         reg = TemplateRegistry()
         reg.register(Template("t1", "prompt"))
         assert "t1" in repr(reg)
+
+
+# ---------------------------------------------------------------------------
+# JSONOutputTemplate
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def simple_schema():
+    return Schema(
+        name="IntroOutput",
+        fields=[
+            FieldSpec(name="greeting", type="str", required=True,
+                      description="A greeting message"),
+            FieldSpec(name="opening", type="str", required=False,
+                      description="An opening line"),
+        ],
+    )
+
+
+class TestJSONOutputTemplate:
+
+    def test_is_subclass_of_template(self, simple_schema):
+        t = JSONOutputTemplate("t", "Base {name}.", schema=simple_schema)
+        assert isinstance(t, Template)
+
+    def test_render_contains_base_prompt(self, simple_schema):
+        t = JSONOutputTemplate("t", "Greet {name}.", schema=simple_schema)
+        rendered = t.render({"name": "Alice"})
+        assert rendered.startswith("Greet Alice.")
+
+    def test_render_appends_json_block(self, simple_schema):
+        t = JSONOutputTemplate("t", "Task.", schema=simple_schema)
+        rendered = t.render({})
+        assert "Respond with a valid JSON object" in rendered
+        assert '"greeting"' in rendered
+        assert '"opening"' in rendered
+        assert "Output only the JSON object" in rendered
+
+    def test_render_includes_field_types(self, simple_schema):
+        t = JSONOutputTemplate("t", "Task.", schema=simple_schema)
+        rendered = t.render({})
+        assert "(str, required)" in rendered
+        assert "(str, optional)" in rendered
+
+    def test_render_includes_field_descriptions(self, simple_schema):
+        t = JSONOutputTemplate("t", "Task.", schema=simple_schema)
+        rendered = t.render({})
+        assert "A greeting message" in rendered
+        assert "An opening line" in rendered
+
+    def test_render_omits_description_when_empty(self):
+        schema = Schema("S", fields=[FieldSpec("val", "int", required=True, description="")])
+        t = JSONOutputTemplate("t", "Task.", schema=schema)
+        rendered = t.render({})
+        # No description suffix should appear after the field spec
+        assert '"val" (int, required)' in rendered
+        assert '"val" (int, required):' not in rendered
+
+    def test_render_base_and_json_separated_by_blank_line(self, simple_schema):
+        t = JSONOutputTemplate("t", "Base.", schema=simple_schema)
+        rendered = t.render({})
+        assert "\n\n" in rendered
+
+    def test_render_raises_on_missing_binding(self, simple_schema):
+        t = JSONOutputTemplate("t", "Hello, {name}.", schema=simple_schema)
+        with pytest.raises(KeyError, match="name"):
+            t.render({})
+
+    def test_schema_property(self, simple_schema):
+        t = JSONOutputTemplate("t", "Task.", schema=simple_schema)
+        assert t.schema is simple_schema
+
+    def test_repr(self, simple_schema):
+        t = JSONOutputTemplate("t", "Task.", schema=simple_schema)
+        r = repr(t)
+        assert "JSONOutputTemplate" in r
+        assert "IntroOutput" in r
+
+    def test_registered_in_registry(self, simple_schema):
+        reg = TemplateRegistry()
+        t = JSONOutputTemplate("greet", "Task.", schema=simple_schema)
+        reg.register(t)
+        assert reg.get("greet") is t
+
+    def test_no_schema_fields_renders_empty_list(self):
+        schema = Schema("Empty", fields=[])
+        t = JSONOutputTemplate("t", "Task.", schema=schema)
+        rendered = t.render({})
+        assert "Respond with a valid JSON object" in rendered
+        assert "Output only the JSON object" in rendered
