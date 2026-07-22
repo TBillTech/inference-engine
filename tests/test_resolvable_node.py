@@ -530,7 +530,9 @@ class TestEndToEnd:
             """Transforms the prompt to upper-case and returns it as data."""
 
             name = "uppercase"
-            calls: list = []
+
+            def __init__(self) -> None:
+                self.calls: list = []
 
             def resolve(self, request):
                 self.calls.append(request)
