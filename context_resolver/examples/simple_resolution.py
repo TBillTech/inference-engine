@@ -12,7 +12,7 @@ This script demonstrates:
 
 Run with::
 
-    python -m context_resolver.examples.simple_prompt
+    python -m context_resolver.examples.simple_resolution
 """
 
 from __future__ import annotations
