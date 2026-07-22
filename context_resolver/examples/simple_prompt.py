@@ -35,31 +35,37 @@ def build_example_context() -> Context:
         root
         ├── player
         │   ├── name   (ScalarNode: "Alice")
-        │   └── greeting  (ResolvableNode: template="greet", input_bindings={"name": Path("player","name")})
+        │   └── intro  (ResolvableNode: template="greet", input_bindings={"name": Path("player","name")})
         └── world
             └── setting  (ScalarNode: "a fantasy kingdom")
 
-    The ``greeting`` node is initially underspecified.  Querying it will
+    The ``intro`` node is initially underspecified.  Querying it will
     trigger the mock resolution provider to produce a greeting.
     """
-    # --- Schema for the greeting output ---
-    greeting_schema = Schema(
-        name="GreetingOutput",
+    # --- Schema for the intro output ---
+    intro_schema = Schema(
+        name="IntroOutput",
         fields=[
             FieldSpec(name="greeting", type="str", required=True,
                       description="A greeting message for the player"),
+            FieldSpec(
+                name="opening",
+                type="str",
+                required=True,
+                description="An opening line that sets the scene",
+            ),
         ],
-        description="Expected output from the greeting template",
+        description="Expected output from the intro template",
     )
 
     # --- ResolvableNode that needs to be resolved ---
-    greeting_node = ResolvableNode(
+    intro_node = ResolvableNode(
         template_ref="greet",
         input_bindings={
             "name": Path("player", "name"),
             "setting": Path("world", "setting"),
         },
-        output_schema=greeting_schema,
+        output_schema=intro_schema,
         dependencies=[Path("player", "name"), Path("world", "setting")],
     )
 
@@ -67,7 +73,7 @@ def build_example_context() -> Context:
     root = MappingNode({
         "player": MappingNode({
             "name": ScalarNode("Alice"),
-            "greeting": greeting_node,
+            "intro": intro_node,
         }),
         "world": MappingNode({
             "setting": ScalarNode("a fantasy kingdom"),
@@ -78,17 +84,24 @@ def build_example_context() -> Context:
     registry = TemplateRegistry()
     registry.register(Template(
         name="greet",
-        template_str="You are a narrator in {setting}. Greet the hero named {name}.",
-        description="Generates a greeting for the player",
+        template_str=(
+            "You are a hero in the great Kingdom of {setting}. "
+            "Greet the hero named {name}."
+        ),
+        description="Generates an intro for the player",
     ))
 
     # --- Mock provider returns a canned response ---
     rendered_prompt = (
-        "You are a narrator in a fantasy kingdom. Greet the hero named Alice."
+        "You are a hero in the great Kingdom of a fantasy kingdom. "
+        "Greet the hero named Alice."
     )
     mock_provider = MockProvider(
         responses={
-            rendered_prompt: {"greeting": "Hail, brave Alice! Welcome to the kingdom!"}
+            rendered_prompt: {
+                "greeting": "Hail, brave Alice! Welcome to the kingdom!",
+                "opening": "You are a hero in the great Kingdom of a fantasy kingdom.",
+            }
         }
     )
 
@@ -115,30 +128,32 @@ def main() -> None:
     print(f"    → {name_node!r}")
 
     # 2. Query the ResolvableNode – triggers lazy resolution.
-    print("\n[2] Querying player.greeting (triggers resolution)...")
-    greeting_node = ctx.query(Path("player", "greeting"))
-    print(f"    → {greeting_node!r}")
+    print("\n[2] Querying player.intro (triggers resolution)...")
+    intro_node = ctx.query(Path("player", "intro"))
+    print(f"    → {intro_node!r}")
 
-    assert hasattr(greeting_node, "result"), "Expected a ResolvableNode"
-    result = greeting_node.result  # type: ignore[union-attr]
+    assert hasattr(intro_node, "result"), "Expected a ResolvableNode"
+    result = intro_node.result  # type: ignore[union-attr]
     greeting_text = result.get("greeting").value  # type: ignore[union-attr]
+    opening_text = result.get("opening").value  # type: ignore[union-attr]
     print(f"    Resolved greeting: {greeting_text!r}")
-    print(f"    Provider: {greeting_node.provider!r}")  # type: ignore[union-attr]
-    print(f"    Resolved at: {greeting_node.resolved_at}")  # type: ignore[union-attr]
+    print(f"    Resolved opening: {opening_text!r}")
+    print(f"    Provider: {intro_node.provider!r}")  # type: ignore[union-attr]
+    print(f"    Resolved at: {intro_node.resolved_at}")  # type: ignore[union-attr]
 
     # 3. Second query – should be served from cache.
-    print("\n[3] Querying player.greeting again (should be cached)...")
-    cached = ctx.query(Path("player", "greeting"))
-    print(f"    → {cached!r} (same object: {cached is greeting_node})")
+    print("\n[3] Querying player.intro again (should be cached)...")
+    cached = ctx.query(Path("player", "intro"))
+    print(f"    → {cached!r} (same object: {cached is intro_node})")
 
     # 4. Mutate a dependency – cache should be invalidated.
-    print("\n[4] Changing player.name to 'Bob' (invalidates greeting cache)...")
+    print("\n[4] Changing player.name to 'Bob' (invalidates intro cache)...")
     ctx.set(Path("player", "name"), ScalarNode("Bob"))
     # Inspect the node directly to observe the stale state without triggering
     # re-resolution (the mock only has a canned response for "Alice").
     from context_resolver.query.resolver import _resolve_path
-    stale_node = _resolve_path(ctx.root, Path("player", "greeting"))
-    print(f"    greeting resolution_state after mutation: {stale_node.resolution_state.name}")  # type: ignore[union-attr]
+    stale_node = _resolve_path(ctx.root, Path("player", "intro"))
+    print(f"    intro resolution_state after mutation: {stale_node.resolution_state.name}")  # type: ignore[union-attr]
     print("    (Re-querying would trigger re-resolution with the new name.)")
 
     print("\n[5] Context tree (serialized):")

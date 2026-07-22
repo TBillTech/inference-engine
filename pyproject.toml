@@ -3,9 +3,9 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "context-compiler"
+name = "context-resolver"
 version = "0.1.0"
-description = "A demand-driven, incremental compiler over a typed semantic tree for LLM-driven applications."
+description = "A demand-driven, incremental resolver over a typed semantic tree for LLM-driven applications."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
