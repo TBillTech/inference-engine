@@ -2,7 +2,7 @@
 Resolution strategy interface.
 
 A :class:`ResolutionStrategy` describes *how* a
-:class:`~context_compiler.ast.prompt_node.ResolvableNode` should be resolved –
+:class:`~context_compiler.ast.resolvable_node.ResolvableNode` should be resolved –
 the semantic procedure.  It is separate from the
 :class:`~context_compiler.inference.provider.ResolutionProvider`, which
 describes *which engine* executes that procedure.
@@ -41,7 +41,7 @@ class ResolutionStrategy:
     Abstract base class for all resolution strategies.
 
     A :class:`ResolutionStrategy` describes the *procedure* used to resolve a
-    :class:`~context_compiler.ast.prompt_node.ResolvableNode` – it is concerned
+    :class:`~context_compiler.ast.resolvable_node.ResolvableNode` – it is concerned
     with *what* to do, not *which engine* does the work.
 
     Possible implementations include:

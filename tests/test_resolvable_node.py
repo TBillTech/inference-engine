@@ -1,65 +1,32 @@
 """
-Tests for the generalized architecture rename:
+Tests for the query-resolution architecture:
 
-* ``ResolvableNode`` (was ``PromptNode``)
-* ``ResolvableNodeState`` (was ``PromptNodeState``)
+* ``ResolvableNode`` / ``ResolvableNodeState``
 * ``ResolutionProvider`` / ``ResolutionRequest`` / ``ResolutionResult``
-  (were ``InferenceProvider`` / ``InferenceRequest`` / ``InferenceResponse``)
-* ``ResolutionPass`` (was ``InferencePass``)
-* ``ResolutionStrategy`` / ``PromptStrategy`` (new strategy abstraction)
-
-Backward-compatibility aliases are also checked.
+* ``ResolutionPass``
+* ``ResolutionStrategy`` / ``PromptStrategy``
+* ``Resolver`` (query engine)
 """
 
 import pytest
 
 from context_compiler.ast.nodes import ScalarNode, MappingNode, NodeState
 from context_compiler.ast.paths import Path
-from context_compiler.ast.prompt_node import (
+from context_compiler.ast.resolvable_node import (
     ResolvableNode,
     ResolvableNodeState,
-    PromptNode,
-    PromptNodeState,
 )
 from context_compiler.ast.schema import Schema, FieldSpec
 from context_compiler.inference.provider import (
     ResolutionProvider,
     ResolutionRequest,
     ResolutionResult,
-    InferenceProvider,
-    InferenceRequest,
-    InferenceResponse,
 )
 from context_compiler.inference.strategy import ResolutionStrategy, PromptStrategy
 from context_compiler.inference.mock_provider import MockProvider
-from context_compiler.compiler.passes import ResolutionPass, InferencePass
-from context_compiler.compiler.compiler import Compiler
+from context_compiler.query.passes import ResolutionPass
+from context_compiler.query.resolver import Resolver
 from context_compiler.templates.template import Template, TemplateRegistry
-
-
-# ---------------------------------------------------------------------------
-# Aliases are identical objects
-# ---------------------------------------------------------------------------
-
-
-class TestBackwardCompatAliases:
-    def test_prompt_node_is_resolvable_node(self):
-        assert PromptNode is ResolvableNode
-
-    def test_prompt_node_state_is_resolvable_node_state(self):
-        assert PromptNodeState is ResolvableNodeState
-
-    def test_inference_provider_is_resolution_provider(self):
-        assert InferenceProvider is ResolutionProvider
-
-    def test_inference_request_is_resolution_request(self):
-        assert InferenceRequest is ResolutionRequest
-
-    def test_inference_response_is_resolution_result(self):
-        assert InferenceResponse is ResolutionResult
-
-    def test_inference_pass_is_resolution_pass(self):
-        assert InferencePass is ResolutionPass
 
 
 # ---------------------------------------------------------------------------
@@ -89,10 +56,6 @@ class TestResolvableNodeInitialState:
     def test_initial_resolution_state_is_pending(self, resolvable_node):
         assert resolvable_node.resolution_state is ResolvableNodeState.PENDING
 
-    def test_prompt_state_alias_matches_resolution_state(self, resolvable_node):
-        """prompt_state is a backward-compat alias for resolution_state."""
-        assert resolvable_node.prompt_state is resolvable_node.resolution_state
-
     def test_initial_node_state_is_underspecified(self, resolvable_node):
         assert resolvable_node.state is NodeState.UNDERSPECIFIED
 
@@ -102,7 +65,7 @@ class TestResolvableNodeInitialState:
     def test_error_is_none(self, resolvable_node):
         assert resolvable_node.error is None
 
-    def test_repr_uses_new_class_name(self, resolvable_node):
+    def test_repr_uses_class_name(self, resolvable_node):
         assert "ResolvableNode" in repr(resolvable_node)
         assert "resolution_state" in repr(resolvable_node)
 
@@ -172,25 +135,6 @@ class TestResolvableNodeSerialization:
         assert restored.resolution_state is ResolvableNodeState.RESOLVED
         assert restored.provider == "mock"
 
-    def test_legacy_prompt_state_key_is_accepted(self, resolvable_node):
-        """Old serialised data using 'prompt_state' must still deserialise."""
-        d = resolvable_node.to_dict()
-        # Simulate legacy format
-        d["type"] = "PromptNode"
-        d["prompt_state"] = d.pop("resolution_state")
-        restored = ResolvableNode.from_dict(d)
-        assert restored.resolution_state is ResolvableNodeState.PENDING
-
-    def test_legacy_prompt_node_type_is_accepted(self, resolvable_node):
-        """'PromptNode' type key must deserialise to ResolvableNode."""
-        from context_compiler.ast.nodes import _node_from_dict
-
-        d = resolvable_node.to_dict()
-        d["type"] = "PromptNode"
-        d["prompt_state"] = d.pop("resolution_state")
-        restored = _node_from_dict(d)
-        assert isinstance(restored, ResolvableNode)
-
 
 # ---------------------------------------------------------------------------
 # ResolutionRequest / ResolutionResult
@@ -217,11 +161,6 @@ class TestResolutionRequest:
         assert req.query_path is path
         assert len(req.dependencies) == 1
         assert req.metadata["hint"] == "database"
-
-    def test_inference_request_alias_works(self):
-        """InferenceRequest is an alias; existing call sites continue to work."""
-        req = InferenceRequest(prompt="legacy")
-        assert req.prompt == "legacy"
 
 
 class TestResolutionResult:
@@ -252,11 +191,6 @@ class TestResolutionResult:
         assert res.provenance["model"] == "gpt-4o"
         assert res.confidence == pytest.approx(0.95)
 
-    def test_inference_response_alias_works(self):
-        """InferenceResponse is an alias; existing call sites continue to work."""
-        res = InferenceResponse(data={"a": 1}, model="gpt-4", provider="openai")
-        assert res.model == "gpt-4"
-
 
 # ---------------------------------------------------------------------------
 # ResolutionProvider
@@ -268,19 +202,6 @@ class TestResolutionProvider:
         p = ResolutionProvider()
         with pytest.raises(NotImplementedError, match="resolve"):
             p.resolve(ResolutionRequest(prompt="x"))
-
-    def test_infer_alias_delegates_to_resolve(self):
-        """infer() is a backward-compat shim that calls resolve()."""
-
-        class MyProvider(ResolutionProvider):
-            name = "my"
-
-            def resolve(self, request):
-                return ResolutionResult(data={"ok": True}, provider="my")
-
-        p = MyProvider()
-        result = p.infer(ResolutionRequest(prompt="hi"))
-        assert result.data == {"ok": True}
 
     def test_can_resolve_defaults_to_true(self):
         p = ResolutionProvider()
@@ -398,7 +319,7 @@ class TestPromptStrategy:
 
 
 # ---------------------------------------------------------------------------
-# ResolutionPass / InferencePass alias
+# ResolutionPass
 # ---------------------------------------------------------------------------
 
 
@@ -407,12 +328,6 @@ class TestResolutionPass:
         provider = MockProvider()
         rp = ResolutionPass(provider)
         assert rp.provider is provider
-
-    def test_inference_pass_alias(self):
-        provider = MockProvider()
-        ip = InferencePass(provider)
-        assert isinstance(ip, ResolutionPass)
-        assert ip.provider is provider
 
     def test_resolution_pass_wraps_provider_in_prompt_strategy(self):
         """A bare provider is automatically wrapped in a PromptStrategy."""
@@ -451,12 +366,12 @@ class TestResolutionPass:
 
 
 # ---------------------------------------------------------------------------
-# End-to-end: compile with new API names
+# End-to-end: resolve with new API names
 # ---------------------------------------------------------------------------
 
 
 class TestEndToEnd:
-    def _build_compiler(self):
+    def _build_resolver(self):
         registry = TemplateRegistry()
         registry.register(Template(
             name="tmpl",
@@ -466,12 +381,12 @@ class TestEndToEnd:
             responses={"Resolve: hello": {"result": "world"}}
         )
         return (
-            Compiler(template_registry=registry, passes=[ResolutionPass(provider)]),
+            Resolver(template_registry=registry, passes=[ResolutionPass(provider)]),
             provider,
         )
 
-    def test_compile_resolvable_node(self):
-        compiler, provider = self._build_compiler()
+    def test_resolve_resolvable_node(self):
+        resolver, provider = self._build_resolver()
         node = ResolvableNode(
             template_ref="tmpl",
             input_bindings={"x": Path("data", "x")},
@@ -480,13 +395,13 @@ class TestEndToEnd:
             "data": MappingNode({"x": ScalarNode("hello")}),
             "target": node,
         })
-        compiled = compiler.compile_node(node, Path("target"), root)
-        assert isinstance(compiled, ResolvableNode)
-        assert compiled.resolution_state is ResolvableNodeState.RESOLVED
+        resolved = resolver.resolve_node(node, Path("target"), root)
+        assert isinstance(resolved, ResolvableNode)
+        assert resolved.resolution_state is ResolvableNodeState.RESOLVED
         assert provider.call_count == 1
 
     def test_resolution_request_includes_query_path(self):
-        compiler, provider = self._build_compiler()
+        resolver, provider = self._build_resolver()
         node = ResolvableNode(
             template_ref="tmpl",
             input_bindings={"x": Path("data", "x")},
@@ -495,17 +410,17 @@ class TestEndToEnd:
             "data": MappingNode({"x": ScalarNode("hello")}),
             "target": node,
         })
-        compiler.compile_node(node, Path("target"), root)
+        resolver.resolve_node(node, Path("target"), root)
         assert provider.last_request is not None
         assert provider.last_request.query_path == Path("target")
 
-    def test_compile_with_explicit_prompt_strategy(self):
+    def test_resolve_with_explicit_prompt_strategy(self):
         """Passing a PromptStrategy directly to ResolutionPass works end-to-end."""
         registry = TemplateRegistry()
         registry.register(Template(name="tmpl", template_str="Resolve: {x}"))
         provider = MockProvider(responses={"Resolve: hello": {"result": "world"}})
         strategy = PromptStrategy(provider)
-        compiler = Compiler(
+        resolver = Resolver(
             template_registry=registry,
             passes=[ResolutionPass(strategy)],
         )
@@ -517,12 +432,12 @@ class TestEndToEnd:
             "data": MappingNode({"x": ScalarNode("hello")}),
             "target": node,
         })
-        compiled = compiler.compile_node(node, Path("target"), root)
-        assert compiled.resolution_state is ResolvableNodeState.RESOLVED
+        resolved = resolver.resolve_node(node, Path("target"), root)
+        assert resolved.resolution_state is ResolvableNodeState.RESOLVED
         assert provider.call_count == 1
 
-    def test_custom_strategy_is_called_by_compiler(self):
-        """A custom ResolutionStrategy is invoked by the compiler."""
+    def test_custom_strategy_is_called_by_resolver(self):
+        """A custom ResolutionStrategy is invoked by the resolver."""
         registry = TemplateRegistry()
         registry.register(Template(name="tmpl", template_str="Resolve: {x}"))
 
@@ -542,7 +457,7 @@ class TestEndToEnd:
                 )
 
         custom_strategy = UpperCaseStrategy()
-        compiler = Compiler(
+        resolver = Resolver(
             template_registry=registry,
             passes=[ResolutionPass(custom_strategy)],
         )
@@ -554,7 +469,7 @@ class TestEndToEnd:
             "data": MappingNode({"x": ScalarNode("hello")}),
             "target": node,
         })
-        compiled = compiler.compile_node(node, Path("target"), root)
-        assert compiled.resolution_state is ResolvableNodeState.RESOLVED
+        resolved = resolver.resolve_node(node, Path("target"), root)
+        assert resolved.resolution_state is ResolvableNodeState.RESOLVED
         assert len(custom_strategy.calls) == 1
         assert custom_strategy.calls[0].prompt == "Resolve: hello"

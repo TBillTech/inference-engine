@@ -1,8 +1,4 @@
-"""
-Compiler sub-package – redirects to context_compiler.query.
-
-This package has been renamed to ``context_compiler.query``.
-"""
+"""Query sub-package: dependency graph, pass registry, and the main Resolver."""
 
 from context_compiler.query.dependency_graph import DependencyGraph, CycleError
 from context_compiler.query.passes import (
@@ -12,17 +8,11 @@ from context_compiler.query.passes import (
 )
 from context_compiler.query.resolver import Resolver
 
-# Keep Compiler as an alias for Resolver for any existing usage within the package.
-Compiler = Resolver
-CompilerPass = QueryPass
-
 __all__ = [
     "DependencyGraph",
     "CycleError",
     "QueryPass",
-    "CompilerPass",
     "DeterministicPass",
     "ResolutionPass",
     "Resolver",
-    "Compiler",
 ]

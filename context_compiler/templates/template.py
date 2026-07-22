@@ -23,7 +23,7 @@ class Template:
     ----------
     name:
         A unique identifier for this template (must match the
-        :attr:`~context_compiler.ast.prompt_node.PromptNode.template_ref`).
+        :attr:`~context_compiler.ast.resolvable_node.ResolvableNode.template_ref`).
     template_str:
         A Python format string.  Variables are referenced as ``{variable_name}``.
     description:

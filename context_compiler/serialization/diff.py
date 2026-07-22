@@ -121,7 +121,7 @@ def _diff_nodes(
             _diff_nodes(old.get(i), new.get(i), path / i, diffs)
         return
 
-    # Fallback for other node types (e.g. PromptNode).
+    # Fallback for other node types (e.g. ResolvableNode).
     old_dict = old.to_dict()
     new_dict = new.to_dict()
     if old_dict != new_dict:

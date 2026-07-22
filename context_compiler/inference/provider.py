@@ -1,19 +1,13 @@
 """
 Resolution provider interface.
 
-The compiler depends **only** on this interface; it never imports concrete
+The query engine depends **only** on this interface; it never imports concrete
 provider implementations directly.  This decoupling means you can swap
 providers (OpenAI → Anthropic → Prolog → Database) without touching the
-compiler.
+query engine.
 
 All concrete providers must subclass :class:`ResolutionProvider` and implement
 :meth:`ResolutionProvider.resolve`.
-
-Backward Compatibility
-----------------------
-``InferenceProvider``, ``InferenceRequest``, and ``InferenceResponse`` are
-kept as aliases for :class:`ResolutionProvider`, :class:`ResolutionRequest`,
-and :class:`ResolutionResult` respectively.
 """
 
 from __future__ import annotations
@@ -72,10 +66,6 @@ class ResolutionRequest:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
-#: Backward-compatible alias for :class:`ResolutionRequest`.
-InferenceRequest = ResolutionRequest
-
-
 @dataclass
 class ResolutionResult:
     """
@@ -118,16 +108,12 @@ class ResolutionResult:
     raw: Any = None
 
 
-#: Backward-compatible alias for :class:`ResolutionResult`.
-InferenceResponse = ResolutionResult
-
-
 class ResolutionProvider:
     """
     Abstract base class for all resolution providers.
 
     A :class:`ResolutionProvider` is any engine capable of resolving an
-    underspecified :class:`~context_compiler.ast.prompt_node.ResolvableNode`.
+    underspecified :class:`~context_compiler.ast.resolvable_node.ResolvableNode`.
 
     Possible implementations include:
 
@@ -164,8 +150,8 @@ class ResolutionProvider:
         -------
         ResolutionResult
             A typed result.  The ``data`` field must be a plain dict that will
-            be decoded by the compiler's decoder pass, unless a
-            ``resolved_node`` is provided directly.
+            be decoded by the resolver, unless a ``resolved_node`` is provided
+            directly.
 
         Raises
         ------
@@ -178,22 +164,13 @@ class ResolutionProvider:
             f"{type(self).__name__} must implement ResolutionProvider.resolve()"
         )
 
-    def infer(self, request: ResolutionRequest) -> ResolutionResult:
-        """
-        Backward-compatible alias for :meth:`resolve`.
-
-        .. deprecated::
-            Use :meth:`resolve` instead.
-        """
-        return self.resolve(request)
-
     def can_resolve(self, request: ResolutionRequest) -> bool:
         """
         Return ``True`` if this provider is capable of resolving *request*.
 
         The default implementation always returns ``True``.  Override this
         method to add provider-specific capability declarations, enabling the
-        compiler to select the most appropriate provider for a given request.
+        resolver to select the most appropriate provider for a given request.
 
         This is a hook for future provider selection logic.
         """
@@ -204,14 +181,10 @@ class ResolutionProvider:
         Return ``True`` if this provider natively supports JSON-mode or
         function-calling structured output.
 
-        The compiler uses this hint to decide whether to include schema
+        The resolver uses this hint to decide whether to include schema
         constraints in the request.
         """
         return False
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(name={self.name!r})"
-
-
-#: Backward-compatible alias for :class:`ResolutionProvider`.
-InferenceProvider = ResolutionProvider

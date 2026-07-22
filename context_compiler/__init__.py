@@ -1,8 +1,8 @@
 """
-context_compiler – A general-purpose demand-driven semantic compiler over a
+context_compiler – A general-purpose demand-driven semantic query engine over a
 typed semantic tree.
 
-LLMs are one possible resolution engine; the compiler itself is agnostic to
+LLMs are one possible resolution engine; the resolver itself is agnostic to
 the resolution strategy used.
 """
 
