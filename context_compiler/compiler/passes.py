@@ -4,16 +4,21 @@ Compiler pass infrastructure.
 Compiler passes transform the Context tree in a composable, independently
 testable way.  Each pass should:
 
-* be deterministic (same input → same output) unless it wraps inference
+* be deterministic (same input → same output) unless it wraps resolution
 * have no hidden side effects beyond modifying the nodes it is given
 * be independently testable without spinning up a full compiler
 
 Pass types
 ----------
 * :class:`DeterministicPass` – rule-based normalization / constraint passes.
-* :class:`InferencePass` – drives LLM inference for unresolved PromptNodes.
+* :class:`ResolutionPass` – drives provider resolution for unresolved
+  :class:`~context_compiler.ast.prompt_node.ResolvableNode` instances.
 
 Custom passes should subclass one of these and implement :meth:`run`.
+
+Backward Compatibility
+----------------------
+``InferencePass`` is kept as an alias for :class:`ResolutionPass`.
 """
 
 from __future__ import annotations
@@ -23,8 +28,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from context_compiler.ast.nodes import Node
     from context_compiler.ast.paths import Path
-    from context_compiler.ast.prompt_node import PromptNode
-    from context_compiler.inference.provider import InferenceProvider
+    from context_compiler.ast.prompt_node import ResolvableNode
+    from context_compiler.inference.provider import ResolutionProvider
 
 
 class PassContext:
@@ -89,7 +94,7 @@ class DeterministicPass(CompilerPass):
     A compiler pass that applies deterministic, rule-based transformations.
 
     Sub-class and implement :meth:`run` to add normalization, validation, or
-    other purely deterministic transformations that do not require inference.
+    other purely deterministic transformations that do not require resolution.
 
     Examples of deterministic passes:
 
@@ -101,23 +106,32 @@ class DeterministicPass(CompilerPass):
     name: str = "deterministic-pass"
 
 
-class InferencePass(CompilerPass):
+class ResolutionPass(CompilerPass):
     """
-    A compiler pass that resolves unresolved :class:`~context_compiler.ast.prompt_node.PromptNode`
-    instances using an :class:`~context_compiler.inference.provider.InferenceProvider`.
+    A compiler pass that resolves unresolved
+    :class:`~context_compiler.ast.prompt_node.ResolvableNode` instances using a
+    :class:`~context_compiler.inference.provider.ResolutionProvider`.
+
+    The compiler is provider-agnostic: any
+    :class:`~context_compiler.inference.provider.ResolutionProvider`
+    implementation can be used (LLM, database, constraint solver, etc.).
 
     Parameters
     ----------
     provider:
-        The inference provider to use.
+        The resolution provider to use.
     """
 
-    name: str = "inference-pass"
+    name: str = "resolution-pass"
 
-    def __init__(self, provider: "InferenceProvider") -> None:
+    def __init__(self, provider: "ResolutionProvider") -> None:
         self._provider = provider
 
     @property
-    def provider(self) -> "InferenceProvider":
-        """The configured inference provider."""
+    def provider(self) -> "ResolutionProvider":
+        """The configured resolution provider."""
         return self._provider
+
+
+#: Backward-compatible alias for :class:`ResolutionPass`.
+InferencePass = ResolutionPass

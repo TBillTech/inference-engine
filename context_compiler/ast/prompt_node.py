@@ -1,16 +1,28 @@
 """
-PromptNode – a deferred semantic inference node.
+ResolvableNode – a deferred semantic resolution node.
 
-A :class:`PromptNode` represents work that has been declared but not yet
-executed.  It transitions through three states:
+A :class:`ResolvableNode` represents any semantic value that is currently
+underspecified and can be resolved by one or more
+:class:`~context_compiler.inference.provider.ResolutionProvider` implementations.
+It is **not** specifically tied to prompts or LLMs; any provider capable of
+resolving the node may be used.
+
+The node transitions through the following states:
 
 * **PENDING** – declared but never compiled.
 * **STALE** – a dependency has changed; the cached result is no longer valid.
-* **RESOLVED** – inference succeeded; the result is cached.
+* **RESOLVED** – resolution succeeded; the result is cached.
 * **ERROR** – compilation failed; the error is stored for inspection.
 
-A PromptNode is **never** replaced by its result.  It retains its provenance
-and cached output so the compiler can audit, replay, or diff compilations.
+A :class:`ResolvableNode` is **never** replaced by its result.  It retains its
+provenance and cached output so the compiler can audit, replay, or diff
+compilations.
+
+Backward Compatibility
+----------------------
+``PromptNode`` and ``PromptNodeState`` are kept as aliases for
+:class:`ResolvableNode` and :class:`ResolvableNodeState` respectively.
+The :attr:`prompt_state` property is an alias for :attr:`resolution_state`.
 """
 
 from __future__ import annotations
@@ -24,8 +36,8 @@ from context_compiler.ast.paths import Path
 from context_compiler.ast.schema import Schema
 
 
-class PromptNodeState(Enum):
-    """Lifecycle state of a :class:`PromptNode`."""
+class ResolvableNodeState(Enum):
+    """Lifecycle state of a :class:`ResolvableNode`."""
 
     PENDING = auto()
     """The node has been declared but not yet compiled."""
@@ -34,32 +46,42 @@ class PromptNodeState(Enum):
     """A dependency changed; the cached result is invalid."""
 
     RESOLVED = auto()
-    """Inference succeeded; the result is cached."""
+    """Resolution succeeded; the result is cached."""
 
     ERROR = auto()
     """Compilation failed; ``error`` carries the exception."""
 
 
-class PromptNode(Node):
+#: Backward-compatible alias for :class:`ResolvableNodeState`.
+PromptNodeState = ResolvableNodeState
+
+
+class ResolvableNode(Node):
     """
-    A node that defers semantic resolution to an inference provider.
+    A node that defers semantic resolution to a resolution provider.
+
+    A :class:`ResolvableNode` represents any underspecified semantic value
+    that can be resolved by one or more
+    :class:`~context_compiler.inference.provider.ResolutionProvider`
+    implementations.  It is not tied to any specific resolution strategy
+    (LLM prompting, database lookup, constraint solving, etc.).
 
     Parameters
     ----------
     template_ref:
         A string identifier for the :class:`~context_compiler.templates.template.Template`
-        that drives this node's inference step.
+        that drives this node's resolution step.
     input_bindings:
         A mapping from template variable names to :class:`~context_compiler.ast.paths.Path`
         objects that supply the variable values from the Context tree.
     output_schema:
-        The expected output structure returned by the inference provider.
+        The expected output structure returned by the resolution provider.
     dependencies:
         Explicit list of :class:`Path` objects that, when changed, invalidate
         this node's cached result.  (The compiler may also derive implicit
         dependencies from *input_bindings*.)
     metadata:
-        Optional debugging metadata.
+        Optional debugging metadata (provenance, annotations, etc.).
     """
 
     def __init__(
@@ -78,7 +100,7 @@ class PromptNode(Node):
         self.dependencies: list[Path] = list(dependencies or [])
 
         # Runtime state
-        self._prompt_state: PromptNodeState = PromptNodeState.PENDING
+        self._resolution_state: ResolvableNodeState = ResolvableNodeState.PENDING
         self._result: Node | None = None
         self._error: Exception | None = None
         self._resolved_at: datetime.datetime | None = None
@@ -86,17 +108,22 @@ class PromptNode(Node):
         self._model: str | None = None
 
     # ------------------------------------------------------------------
-    # PromptNode state
+    # ResolvableNode state
     # ------------------------------------------------------------------
 
     @property
-    def prompt_state(self) -> PromptNodeState:
-        """Current lifecycle state of this PromptNode."""
-        return self._prompt_state
+    def resolution_state(self) -> ResolvableNodeState:
+        """Current lifecycle state of this ResolvableNode."""
+        return self._resolution_state
+
+    @property
+    def prompt_state(self) -> ResolvableNodeState:
+        """Backward-compatible alias for :attr:`resolution_state`."""
+        return self._resolution_state
 
     @property
     def result(self) -> Node | None:
-        """The cached inference result, or ``None`` if not yet resolved."""
+        """The cached resolution result, or ``None`` if not yet resolved."""
         return self._result
 
     @property
@@ -111,28 +138,28 @@ class PromptNode(Node):
 
     @property
     def provider(self) -> str | None:
-        """Name of the inference provider that produced the cached result."""
+        """Name of the resolution provider that produced the cached result."""
         return self._provider
 
     @property
     def model(self) -> str | None:
-        """Model identifier used during the last inference call."""
+        """Model identifier used during the last resolution call (LLM providers)."""
         return self._model
 
     # ------------------------------------------------------------------
-    # Node.state (delegates to PromptNodeState)
+    # Node.state (delegates to ResolvableNodeState)
     # ------------------------------------------------------------------
 
     @property
     def state(self) -> NodeState:
         """
-        Map :class:`PromptNodeState` to :class:`~context_compiler.ast.nodes.NodeState`.
+        Map :class:`ResolvableNodeState` to :class:`~context_compiler.ast.nodes.NodeState`.
 
         * RESOLVED  → FULLY_SPECIFIED
         * PENDING / STALE → UNDERSPECIFIED
         * ERROR → UNDERSPECIFIED  (caller should inspect :attr:`error`)
         """
-        if self._prompt_state is PromptNodeState.RESOLVED:
+        if self._resolution_state is ResolvableNodeState.RESOLVED:
             return NodeState.FULLY_SPECIFIED
         return NodeState.UNDERSPECIFIED
 
@@ -150,17 +177,21 @@ class PromptNode(Node):
         """
         Transition this node to RESOLVED state.
 
+        The node is **not** discarded after resolution.  Its provenance and
+        cached result are preserved so the compiler can audit or replay.
+
         Parameters
         ----------
         result:
-            The decoded inference result (a typed :class:`Node`).
+            The decoded resolution result (a typed :class:`Node`).
         provider:
-            Human-readable name of the provider (e.g. ``"openai"``).
+            Human-readable name of the provider (e.g. ``"openai"``, ``"mock"``).
         model:
-            Model identifier (e.g. ``"gpt-4o"``).
+            Model identifier (e.g. ``"gpt-4o"``).  May be ``None`` for
+            non-LLM providers.
         """
         self._result = result
-        self._prompt_state = PromptNodeState.RESOLVED
+        self._resolution_state = ResolvableNodeState.RESOLVED
         self._error = None
         self._resolved_at = datetime.datetime.now(datetime.timezone.utc)
         self._provider = provider
@@ -168,12 +199,12 @@ class PromptNode(Node):
 
     def mark_stale(self) -> None:
         """Transition this node to STALE state, invalidating the cached result."""
-        self._prompt_state = PromptNodeState.STALE
+        self._resolution_state = ResolvableNodeState.STALE
         self._result = None
 
     def mark_error(self, error: Exception) -> None:
         """Transition this node to ERROR state with the given exception."""
-        self._prompt_state = PromptNodeState.ERROR
+        self._resolution_state = ResolvableNodeState.ERROR
         self._error = error
 
     # ------------------------------------------------------------------
@@ -197,15 +228,15 @@ class PromptNode(Node):
     # Node protocol
     # ------------------------------------------------------------------
 
-    def _copy_with_metadata(self, metadata: dict[str, Any]) -> "PromptNode":
-        node = PromptNode(
+    def _copy_with_metadata(self, metadata: dict[str, Any]) -> "ResolvableNode":
+        node = ResolvableNode(
             self.template_ref,
             input_bindings=self.input_bindings,
             output_schema=self.output_schema,
             dependencies=self.dependencies,
             metadata=metadata,
         )
-        node._prompt_state = self._prompt_state
+        node._resolution_state = self._resolution_state
         node._result = self._result
         node._error = self._error
         node._resolved_at = self._resolved_at
@@ -215,7 +246,7 @@ class PromptNode(Node):
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "type": "PromptNode",
+            "type": "ResolvableNode",
             "template_ref": self.template_ref,
             "input_bindings": {
                 k: list(v.segments) for k, v in self.input_bindings.items()
@@ -224,7 +255,7 @@ class PromptNode(Node):
                 self.output_schema.to_dict() if self.output_schema else None
             ),
             "dependencies": [list(p.segments) for p in self.dependencies],
-            "prompt_state": self._prompt_state.name,
+            "resolution_state": self._resolution_state.name,
             "result": self._result.to_dict() if self._result is not None else None,
             "error": str(self._error) if self._error else None,
             "resolved_at": (
@@ -236,7 +267,7 @@ class PromptNode(Node):
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "PromptNode":
+    def from_dict(cls, data: dict[str, Any]) -> "ResolvableNode":
         from context_compiler.ast.nodes import _node_from_dict
 
         input_bindings = {
@@ -255,7 +286,9 @@ class PromptNode(Node):
             dependencies=dependencies,
             metadata=data.get("metadata"),
         )
-        node._prompt_state = PromptNodeState[data.get("prompt_state", "PENDING")]
+        # Accept both "resolution_state" (new) and "prompt_state" (legacy) keys.
+        state_key = data.get("resolution_state") or data.get("prompt_state", "PENDING")
+        node._resolution_state = ResolvableNodeState[state_key]
         if data.get("result") is not None:
             node._result = _node_from_dict(data["result"])
         if data.get("error"):
@@ -268,12 +301,22 @@ class PromptNode(Node):
 
     def __repr__(self) -> str:
         return (
-            f"PromptNode(template_ref={self.template_ref!r}, "
-            f"prompt_state={self._prompt_state.name})"
+            f"ResolvableNode(template_ref={self.template_ref!r}, "
+            f"resolution_state={self._resolution_state.name})"
         )
 
 
-# Register PromptNode in the polymorphic node registry.
+#: Backward-compatible alias for :class:`ResolvableNode`.
+PromptNode = ResolvableNode
+
+
+# Register ResolvableNode in the polymorphic node registry.
+# Also register the legacy "PromptNode" type name so that old serialised
+# data can still be deserialised.
 from context_compiler.ast.nodes import register_node_type
 
-register_node_type(PromptNode)
+register_node_type(ResolvableNode)
+# Map the old serialisation key "PromptNode" to the same class.
+from context_compiler.ast.nodes import _NODE_REGISTRY
+
+_NODE_REGISTRY["PromptNode"] = ResolvableNode

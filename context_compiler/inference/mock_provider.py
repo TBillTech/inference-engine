@@ -1,5 +1,5 @@
 """
-Mock inference provider for testing and local development.
+Mock resolution provider for testing and local development.
 
 :class:`MockProvider` returns pre-configured responses without any network
 calls.  You can also configure it to raise exceptions to test error paths.
@@ -7,7 +7,7 @@ calls.  You can also configure it to raise exceptions to test error paths.
 Examples
 --------
 >>> provider = MockProvider(responses={"greet": {"greeting": "Hello, world!"}})
->>> resp = provider.infer(InferenceRequest(prompt="greet"))
+>>> resp = provider.resolve(ResolutionRequest(prompt="greet"))
 >>> resp.data
 {'greeting': 'Hello, world!'}
 """
@@ -17,15 +17,20 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from context_compiler.inference.provider import (
-    InferenceProvider,
-    InferenceRequest,
-    InferenceResponse,
+    ResolutionProvider,
+    ResolutionRequest,
+    ResolutionResult,
 )
 
+# Backward-compatible aliases re-exported for convenience.
+InferenceProvider = ResolutionProvider
+InferenceRequest = ResolutionRequest
+InferenceResponse = ResolutionResult
 
-class MockProvider(InferenceProvider):
+
+class MockProvider(ResolutionProvider):
     """
-    A deterministic, in-memory inference provider for tests.
+    A deterministic, in-memory resolution provider for tests.
 
     Parameters
     ----------
@@ -35,7 +40,7 @@ class MockProvider(InferenceProvider):
     default_response:
         Fallback response dict when no key matches.
     raise_on_call:
-        If set, :meth:`infer` raises this exception instead of returning a
+        If set, :meth:`resolve` raises this exception instead of returning a
         response.  Useful for testing error-handling paths.
     model:
         Model name reported in responses.
@@ -56,9 +61,9 @@ class MockProvider(InferenceProvider):
         self._raise_on_call: Exception | None = raise_on_call
         self._model: str = model
         self.call_count: int = 0
-        self.last_request: InferenceRequest | None = None
+        self.last_request: ResolutionRequest | None = None
 
-    def infer(self, request: InferenceRequest) -> InferenceResponse:
+    def resolve(self, request: ResolutionRequest) -> ResolutionResult:
         """
         Return a pre-configured response for *request*.
 
@@ -77,7 +82,7 @@ class MockProvider(InferenceProvider):
             else str(request.prompt)
         )
         data = self._responses.get(prompt_key, self._default_response)
-        return InferenceResponse(
+        return ResolutionResult(
             data=dict(data),
             model=self._model,
             provider=self.name,

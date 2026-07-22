@@ -2,12 +2,16 @@
 The Context Compiler.
 
 :class:`Compiler` is the central engine that orchestrates compilation passes
-and drives inference for unresolved
-:class:`~context_compiler.ast.prompt_node.PromptNode` instances.
+and drives resolution for unresolved
+:class:`~context_compiler.ast.prompt_node.ResolvableNode` instances.
 
 The compiler is intentionally **lazy**: it only compiles nodes that are
 demanded by a :meth:`~context_compiler.context.context.Context.query` call.
 It never eagerly traverses the entire tree.
+
+The compiler depends **only** on the
+:class:`~context_compiler.inference.provider.ResolutionProvider` interface.
+It has no knowledge of LLMs, prompts, or any specific resolution strategy.
 
 Compilation algorithm (per query)
 ----------------------------------
@@ -17,14 +21,14 @@ Compilation algorithm (per query)
 
    a. Run all registered :class:`~context_compiler.compiler.passes.DeterministicPass` objects.
    b. If the node is now ``FULLY_SPECIFIED``, cache and return it.
-   c. If the node is a :class:`~context_compiler.ast.prompt_node.PromptNode`:
+   c. If the node is a :class:`~context_compiler.ast.prompt_node.ResolvableNode`:
 
       * Resolve all dependency paths (recursively, via query).
-      * Build the inference request from the template and bindings.
-      * Call the :class:`~context_compiler.inference.provider.InferenceProvider`.
+      * Build the resolution request from the template and bindings.
+      * Call the :class:`~context_compiler.inference.provider.ResolutionProvider`.
       * Decode the response into typed nodes.
       * Validate the decoded nodes against the output schema.
-      * Mark the PromptNode as ``RESOLVED`` and cache its result.
+      * Mark the ResolvableNode as ``RESOLVED`` and cache its result.
    d. Run constraint validation passes.
 4. Return the requested node.
 """
@@ -36,11 +40,11 @@ from typing import Any
 
 from context_compiler.ast.nodes import Node, NodeState, MappingNode, SequenceNode, _node_from_dict
 from context_compiler.ast.paths import Path
-from context_compiler.ast.prompt_node import PromptNode, PromptNodeState
+from context_compiler.ast.prompt_node import ResolvableNode, ResolvableNodeState
 from context_compiler.ast.schema import SchemaValidationError
 from context_compiler.compiler.dependency_graph import DependencyGraph, CycleError
-from context_compiler.compiler.passes import CompilerPass, DeterministicPass, InferencePass, PassContext
-from context_compiler.inference.provider import InferenceRequest, InferenceResponse
+from context_compiler.compiler.passes import CompilerPass, DeterministicPass, ResolutionPass, PassContext
+from context_compiler.inference.provider import ResolutionRequest, ResolutionResult
 from context_compiler.templates.template import Template, TemplateRegistry
 
 logger = logging.getLogger(__name__)
@@ -53,6 +57,10 @@ class CompilationError(Exception):
 class Compiler:
     """
     The demand-driven, incremental context compiler.
+
+    The compiler is provider-agnostic: it depends only on the
+    :class:`~context_compiler.inference.provider.ResolutionProvider` interface
+    and never imports any concrete provider implementation.
 
     Parameters
     ----------
@@ -112,10 +120,10 @@ class Compiler:
         Raises
         ------
         CompilationError
-            If compilation fails due to a missing template, inference error,
+            If compilation fails due to a missing template, resolution error,
             schema validation failure, or cycle.
         CycleError
-            If a cyclic PromptNode dependency is detected.
+            If a cyclic ResolvableNode dependency is detected.
         """
         if node.is_fully_specified:
             return node
@@ -141,29 +149,29 @@ class Compiler:
         if node.is_fully_specified:
             return node
 
-        # 2. Handle PromptNodes specially.
-        if isinstance(node, PromptNode):
-            return self._compile_prompt_node(node, path, root)
+        # 2. Handle ResolvableNodes specially.
+        if isinstance(node, ResolvableNode):
+            return self._compile_resolvable_node(node, path, root)
 
         return node
 
-    def _compile_prompt_node(
-        self, node: PromptNode, path: Path, root: Node
-    ) -> PromptNode:
-        """Drive inference for a single PromptNode."""
-        # Find the inference pass (first one wins).
-        inference_pass: InferencePass | None = None
+    def _compile_resolvable_node(
+        self, node: ResolvableNode, path: Path, root: Node
+    ) -> ResolvableNode:
+        """Drive resolution for a single ResolvableNode."""
+        # Find the resolution pass (first one wins).
+        resolution_pass: ResolutionPass | None = None
         for p in self._passes:
-            if isinstance(p, InferencePass):
-                inference_pass = p
+            if isinstance(p, ResolutionPass):
+                resolution_pass = p
                 break
 
-        if inference_pass is None:
+        if resolution_pass is None:
             raise CompilationError(
-                f"No InferencePass configured; cannot resolve PromptNode at {path}"
+                f"No ResolutionPass configured; cannot resolve ResolvableNode at {path}"
             )
 
-        provider = inference_pass.provider
+        provider = resolution_pass.provider
 
         # Resolve dependencies.
         bound_values: dict[str, Any] = {}
@@ -172,7 +180,7 @@ class Compiler:
             dep_node = _resolve_path(root, dep_path)
             if dep_node is None:
                 raise CompilationError(
-                    f"PromptNode at {path}: binding '{var_name}' references "
+                    f"ResolvableNode at {path}: binding '{var_name}' references "
                     f"unknown path {dep_path}"
                 )
             # Recursively compile if needed.
@@ -198,43 +206,45 @@ class Compiler:
             else None
         )
 
-        request = InferenceRequest(
+        request = ResolutionRequest(
             prompt=rendered_prompt,
             output_schema=output_schema_dict,
+            query_path=path,
+            dependencies=node.effective_dependencies(),
         )
 
         # Call the provider.
         try:
-            response: InferenceResponse = provider.infer(request)
+            result: ResolutionResult = provider.resolve(request)
         except Exception as exc:
             node.mark_error(exc)
             raise CompilationError(
-                f"Inference failed for PromptNode at {path}: {exc}"
+                f"Resolution failed for ResolvableNode at {path}: {exc}"
             ) from exc
 
         # Validate the response against the schema.
         if node.output_schema is not None:
             try:
-                node.output_schema.validate(response.data)
+                node.output_schema.validate(result.data)
             except SchemaValidationError as exc:
                 node.mark_error(exc)
                 raise CompilationError(
-                    f"Schema validation failed for PromptNode at {path}: {exc}"
+                    f"Schema validation failed for ResolvableNode at {path}: {exc}"
                 ) from exc
 
         # Decode response data into a typed node.
-        result_node = _decode_response(response.data)
+        result_node = _decode_response(result.data)
 
         node.mark_resolved(
             result_node,
-            provider=response.provider,
-            model=response.model,
+            provider=result.provider,
+            model=result.model,
         )
         logger.debug(
-            "Resolved PromptNode at %s via provider=%s model=%s",
+            "Resolved ResolvableNode at %s via provider=%s model=%s",
             path,
-            response.provider,
-            response.model,
+            result.provider,
+            result.model,
         )
         return node
 
@@ -269,13 +279,13 @@ def _extract_scalar(node: Node) -> Any:
 
     For a :class:`~context_compiler.ast.nodes.ScalarNode` this is just
     :attr:`~context_compiler.ast.nodes.ScalarNode.value`.
-    For a resolved :class:`~context_compiler.ast.prompt_node.PromptNode`
+    For a resolved :class:`~context_compiler.ast.prompt_node.ResolvableNode`
     this recursively extracts the result.
     For compound nodes a dict/list is returned.
     """
     from context_compiler.ast.nodes import ScalarNode, MappingNode, SequenceNode
 
-    if isinstance(node, PromptNode) and node.result is not None:
+    if isinstance(node, ResolvableNode) and node.result is not None:
         return _extract_scalar(node.result)
     if isinstance(node, ScalarNode):
         return node.value
@@ -288,7 +298,7 @@ def _extract_scalar(node: Node) -> Any:
 
 def _decode_response(data: dict[str, Any]) -> Node:
     """
-    Decode a plain dict returned by an inference provider into typed nodes.
+    Decode a plain dict returned by a resolution provider into typed nodes.
 
     Scalar values become :class:`~context_compiler.ast.nodes.ScalarNode` instances.
     Nested dicts become :class:`~context_compiler.ast.nodes.MappingNode` instances.
