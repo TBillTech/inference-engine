@@ -45,7 +45,7 @@ from context_resolver.query.passes import ResolutionPass
 from context_resolver.context.context import Context
 from context_resolver.inference.llama_cpp_provider import LocalLlamaCppProvider
 from context_resolver.inference.strategy import PromptStrategy
-from context_resolver.templates.template import Template, TemplateRegistry
+from context_resolver.templates.template import TemplateRegistry, JSONOutputTemplate
 
 
 def build_example_context(
@@ -118,16 +118,18 @@ def build_example_context(
     })
 
     # --- Template registry ---
+    # JSONOutputTemplate appends a JSON output instruction block automatically
+    # based on the schema fields, so the template_str only needs to describe
+    # the task itself.
     registry = TemplateRegistry()
-    registry.register(Template(
+    registry.register(JSONOutputTemplate(
         name="greet",
         template_str=(
-            "You are narrator for a story in {setting}. "
-            "The heroes name is {name}."
-            "Respond with a JSON object containing exactly two keys: "
-            '"greeting" (a short welcome) and "opening" (a scene-setting line).'
+            "You are a hero in the great Kingdom of {setting}. "
+            "Greet the hero named {name}."
         ),
-        description="Generates an intro for the player",
+        schema=intro_schema,
+        description="Generates an intro for the player with structured JSON output",
     ))
 
     # --- Local llama.cpp provider wired through PromptStrategy ---
