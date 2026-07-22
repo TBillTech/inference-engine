@@ -114,8 +114,9 @@ class TestJSONOutputTemplate:
         schema = Schema("S", fields=[FieldSpec("val", "int", required=True, description="")])
         t = JSONOutputTemplate("t", "Task.", schema=schema)
         rendered = t.render({})
-        # No trailing colon for empty description
-        assert '"val" (int, required)\n' in rendered or rendered.endswith('"val" (int, required)')
+        # No description suffix should appear after the field spec
+        assert '"val" (int, required)' in rendered
+        assert '"val" (int, required):' not in rendered
 
     def test_render_base_and_json_separated_by_blank_line(self, simple_schema):
         t = JSONOutputTemplate("t", "Base.", schema=simple_schema)

@@ -125,7 +125,7 @@ def build_example_context(
     registry.register(JSONOutputTemplate(
         name="greet",
         template_str=(
-            "You are a hero in the great Kingdom of {setting}. "
+            "You are a narrator for a story in the Kingdom of {setting}. "
             "Greet the hero named {name}."
         ),
         schema=intro_schema,
