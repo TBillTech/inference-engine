@@ -12,7 +12,7 @@ It never eagerly traverses the entire tree.
 The resolver depends **only** on the
 :class:`~context_compiler.inference.strategy.ResolutionStrategy` interface
 (via :class:`~context_compiler.query.passes.ResolutionPass`).
-It has no knowledge of LLMs, prompts, or any specific resolution provider.
+It has no direct dependency on specific LLM implementations or resolution providers.
 
 Resolution algorithm (per query)
 ---------------------------------

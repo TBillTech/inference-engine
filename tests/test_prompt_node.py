@@ -1,4 +1,4 @@
-"""Tests for context_compiler.ast.resolvable_node (via the resolvable_node module)."""
+"""Tests for context_compiler.ast.resolvable_node."""
 
 import pytest
 

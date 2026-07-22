@@ -1,8 +1,10 @@
 """
 Redirects to context_compiler.query.resolver.
 
-The compiler package has been renamed to ``context_compiler.query``.
-Use ``context_compiler.query.resolver.Resolver`` and ``resolve_node`` instead.
+.. deprecated::
+    The ``compiler`` package has been renamed to ``context_compiler.query``.
+    Use :class:`context_compiler.query.resolver.Resolver` and
+    :meth:`~context_compiler.query.resolver.Resolver.resolve_node` instead.
 """
 
 from context_compiler.query.resolver import (
@@ -13,7 +15,6 @@ from context_compiler.query.resolver import (
     _decode_response,
 )
 
-# Alias for any code that still references Compiler or CompilationError.
 Compiler = Resolver
 CompilationError = ResolutionError
 

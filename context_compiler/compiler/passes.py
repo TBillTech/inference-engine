@@ -1,8 +1,9 @@
 """
 Redirects to context_compiler.query.passes.
 
-The compiler package has been renamed to ``context_compiler.query``.
-Use ``context_compiler.query.passes`` instead.
+.. deprecated::
+    The ``compiler`` package has been renamed to ``context_compiler.query``.
+    Use :mod:`context_compiler.query.passes` instead.
 """
 
 from context_compiler.query.passes import (
@@ -12,7 +13,6 @@ from context_compiler.query.passes import (
     ResolutionPass,
 )
 
-# Alias for any code that still references CompilerPass.
 CompilerPass = QueryPass
 
 __all__ = [
