@@ -1,13 +1,13 @@
 """
-End-to-end example: lazy compilation with a mock inference provider.
+End-to-end example: lazy resolution with a mock resolution provider.
 
 This script demonstrates:
 
-* Building a Context tree with an unresolved PromptNode.
+* Building a Context tree with an unresolved ResolvableNode.
 * Registering a Template.
 * Registering a MockProvider.
-* Querying the Context – which triggers lazy compilation.
-* Inspecting the resolved PromptNode.
+* Querying the Context – which triggers lazy resolution.
+* Inspecting the resolved ResolvableNode.
 * Mutating a dependency and observing that the cache is invalidated.
 
 Run with::
@@ -19,10 +19,10 @@ from __future__ import annotations
 
 from context_compiler.ast.nodes import MappingNode, ScalarNode
 from context_compiler.ast.paths import Path
-from context_compiler.ast.prompt_node import PromptNode
+from context_compiler.ast.resolvable_node import ResolvableNode
 from context_compiler.ast.schema import Schema, FieldSpec
-from context_compiler.compiler.compiler import Compiler
-from context_compiler.compiler.passes import InferencePass
+from context_compiler.query.resolver import Resolver
+from context_compiler.query.passes import ResolutionPass
 from context_compiler.context.context import Context
 from context_compiler.inference.mock_provider import MockProvider
 from context_compiler.templates.template import Template, TemplateRegistry
@@ -35,12 +35,12 @@ def build_example_context() -> Context:
         root
         ├── player
         │   ├── name   (ScalarNode: "Alice")
-        │   └── greeting  (PromptNode: template="greet", input_bindings={"name": Path("player","name")})
+        │   └── greeting  (ResolvableNode: template="greet", input_bindings={"name": Path("player","name")})
         └── world
             └── setting  (ScalarNode: "a fantasy kingdom")
 
     The ``greeting`` node is initially underspecified.  Querying it will
-    trigger the mock inference provider to produce a greeting.
+    trigger the mock resolution provider to produce a greeting.
     """
     # --- Schema for the greeting output ---
     greeting_schema = Schema(
@@ -52,8 +52,8 @@ def build_example_context() -> Context:
         description="Expected output from the greeting template",
     )
 
-    # --- PromptNode that needs to be resolved ---
-    greeting_prompt = PromptNode(
+    # --- ResolvableNode that needs to be resolved ---
+    greeting_node = ResolvableNode(
         template_ref="greet",
         input_bindings={
             "name": Path("player", "name"),
@@ -67,7 +67,7 @@ def build_example_context() -> Context:
     root = MappingNode({
         "player": MappingNode({
             "name": ScalarNode("Alice"),
-            "greeting": greeting_prompt,
+            "greeting": greeting_node,
         }),
         "world": MappingNode({
             "setting": ScalarNode("a fantasy kingdom"),
@@ -92,34 +92,34 @@ def build_example_context() -> Context:
         }
     )
 
-    # --- Compiler pipeline ---
-    compiler = Compiler(
+    # --- Resolver pipeline ---
+    resolver = Resolver(
         template_registry=registry,
-        passes=[InferencePass(mock_provider)],
+        passes=[ResolutionPass(mock_provider)],
     )
 
-    return Context(root=root, compiler=compiler)
+    return Context(root=root, resolver=resolver)
 
 
 def main() -> None:
     """Run the end-to-end demonstration."""
     print("=" * 60)
-    print("Context Compiler – Simple Prompt Example")
+    print("Context Compiler – Simple Query Resolution Example")
     print("=" * 60)
 
     ctx = build_example_context()
 
-    # 1. Query a fully-specified scalar – no compilation needed.
+    # 1. Query a fully-specified scalar – no resolution needed.
     print("\n[1] Querying player.name (already fully specified)...")
     name_node = ctx.query(Path("player", "name"))
     print(f"    → {name_node!r}")
 
-    # 2. Query the PromptNode – triggers lazy compilation.
-    print("\n[2] Querying player.greeting (triggers inference)...")
+    # 2. Query the ResolvableNode – triggers lazy resolution.
+    print("\n[2] Querying player.greeting (triggers resolution)...")
     greeting_node = ctx.query(Path("player", "greeting"))
     print(f"    → {greeting_node!r}")
 
-    assert hasattr(greeting_node, "result"), "Expected a PromptNode"
+    assert hasattr(greeting_node, "result"), "Expected a ResolvableNode"
     result = greeting_node.result  # type: ignore[union-attr]
     greeting_text = result.get("greeting").value  # type: ignore[union-attr]
     print(f"    Resolved greeting: {greeting_text!r}")
@@ -135,11 +135,11 @@ def main() -> None:
     print("\n[4] Changing player.name to 'Bob' (invalidates greeting cache)...")
     ctx.set(Path("player", "name"), ScalarNode("Bob"))
     # Inspect the node directly to observe the stale state without triggering
-    # re-compilation (the mock only has a canned response for "Alice").
-    from context_compiler.compiler.compiler import _resolve_path
+    # re-resolution (the mock only has a canned response for "Alice").
+    from context_compiler.query.resolver import _resolve_path
     stale_node = _resolve_path(ctx.root, Path("player", "greeting"))
-    print(f"    greeting prompt_state after mutation: {stale_node.prompt_state.name}")  # type: ignore[union-attr]
-    print("    (Re-querying would trigger re-compilation with the new name.)")
+    print(f"    greeting resolution_state after mutation: {stale_node.resolution_state.name}")  # type: ignore[union-attr]
+    print("    (Re-querying would trigger re-resolution with the new name.)")
 
     print("\n[5] Context tree (serialized):")
     import json

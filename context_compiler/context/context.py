@@ -1,10 +1,10 @@
 """
-Context – the top-level semantic tree with lazy, demand-driven compilation.
+Context – the top-level semantic tree with lazy, demand-driven resolution.
 
 The :class:`Context` is the primary interface for application code.  It holds:
 
 * the root :class:`~context_compiler.ast.nodes.Node` of the semantic tree
-* a :class:`~context_compiler.compiler.compiler.Compiler` for resolving
+* a :class:`~context_compiler.query.resolver.Resolver` for resolving
   underspecified nodes
 * a result cache keyed by :class:`~context_compiler.ast.paths.Path`
 
@@ -14,10 +14,10 @@ When :meth:`Context.query` is called:
 
 1. The requested path is located in the tree.
 2. If the node is ``FULLY_SPECIFIED`` *and* cached, return immediately.
-3. Otherwise, hand the node to the compiler and store the result.
-4. Return the (now-compiled) node.
+3. Otherwise, hand the node to the resolver and store the result.
+4. Return the (now-resolved) node.
 
-The compiler is never invoked for nodes that are already fully specified,
+The resolver is never invoked for nodes that are already fully specified,
 ensuring the system is lazy and incremental.
 """
 
@@ -34,9 +34,9 @@ from context_compiler.ast.nodes import (
     ScalarNode,
 )
 from context_compiler.ast.paths import Path
-from context_compiler.ast.prompt_node import PromptNode
-from context_compiler.compiler.compiler import Compiler, _resolve_path
-from context_compiler.compiler.dependency_graph import DependencyGraph
+from context_compiler.ast.resolvable_node import ResolvableNode
+from context_compiler.query.resolver import Resolver, _resolve_path
+from context_compiler.query.dependency_graph import DependencyGraph
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +54,8 @@ class Context:
     root:
         The root node of the semantic tree.  Typically a
         :class:`~context_compiler.ast.nodes.MappingNode`.
-    compiler:
-        The :class:`~context_compiler.compiler.compiler.Compiler` to use for
+    resolver:
+        The :class:`~context_compiler.query.resolver.Resolver` to use for
         resolving underspecified nodes.
 
     Examples
@@ -71,10 +71,10 @@ class Context:
     def __init__(
         self,
         root: Node | None = None,
-        compiler: Compiler | None = None,
+        resolver: Resolver | None = None,
     ) -> None:
         self._root: Node = root or MappingNode()
-        self._compiler: Compiler = compiler or Compiler()
+        self._resolver: Resolver = resolver or Resolver()
         self._cache: dict[Path, Node] = {}
 
     # ------------------------------------------------------------------
@@ -85,8 +85,8 @@ class Context:
         """
         Assign *node* at *path* in the Context tree.
 
-        If any PromptNodes transitively depend on *path*, their cached results
-        are invalidated (marked stale).
+        If any ResolvableNodes transitively depend on *path*, their cached
+        results are invalidated (marked stale).
 
         Parameters
         ----------
@@ -99,11 +99,11 @@ class Context:
         # Invalidate the cache entry for this path.
         self._cache.pop(path, None)
         # Mark all transitive dependents as stale.
-        stale_paths = self._compiler.dependency_graph.transitive_dependents_of(path)
+        stale_paths = self._resolver.dependency_graph.transitive_dependents_of(path)
         for stale_path in stale_paths:
             self._cache.pop(stale_path, None)
             stale_node = _resolve_path(self._root, stale_path)
-            if isinstance(stale_node, PromptNode):
+            if isinstance(stale_node, ResolvableNode):
                 stale_node.mark_stale()
         logger.debug("Set %s; invalidated %d dependent(s)", path, len(stale_paths))
 
@@ -138,14 +138,14 @@ class Context:
             )
 
     # ------------------------------------------------------------------
-    # Query (lazy compilation entry point)
+    # Query (lazy resolution entry point)
     # ------------------------------------------------------------------
 
     def query(self, path: Path) -> Node:
         """
-        Return the node at *path*, compiling it on demand if necessary.
+        Return the node at *path*, resolving it on demand if necessary.
 
-        This is the primary interface for demand-driven compilation.
+        This is the primary interface for demand-driven resolution.
 
         Parameters
         ----------
@@ -161,8 +161,8 @@ class Context:
         ------
         NodeNotFoundError
             If *path* does not exist in the tree.
-        CompilationError
-            If compilation fails for any reason.
+        ResolutionError
+            If resolution fails for any reason.
         """
         # Fast path: check cache first.
         if path in self._cache:
@@ -181,19 +181,15 @@ class Context:
             self._cache[path] = node
             return node
 
-        # Compile the node.
-        logger.debug("Compiling node at %s", path)
-        compiled = self._compiler.compile_node(node, path, self._root)
+        # Resolve the node.
+        logger.debug("Resolving node at %s", path)
+        resolved = self._resolver.resolve_node(node, path, self._root)
 
-        # If compilation produced a fully-specified node, cache it.
-        if compiled.is_fully_specified:
-            self._cache[path] = compiled
-            # If the compiled node is a resolved PromptNode, also cache its result.
-            if isinstance(compiled, PromptNode) and compiled.result is not None:
-                # The result is accessible via the PromptNode itself.
-                pass
+        # If resolution produced a fully-specified node, cache it.
+        if resolved.is_fully_specified:
+            self._cache[path] = resolved
 
-        return compiled
+        return resolved
 
     # ------------------------------------------------------------------
     # Convenience accessors
@@ -205,10 +201,11 @@ class Context:
 
         For :class:`~context_compiler.ast.nodes.ScalarNode` this is the scalar
         value.  For resolved
-        :class:`~context_compiler.ast.prompt_node.PromptNode` instances this
-        returns the result node.  For compound nodes it returns the node itself.
+        :class:`~context_compiler.ast.resolvable_node.ResolvableNode` instances
+        this returns the result node.  For compound nodes it returns the node
+        itself.
         """
-        from context_compiler.compiler.compiler import _extract_scalar
+        from context_compiler.query.resolver import _extract_scalar
 
         node = self.query(path)
         return _extract_scalar(node)
@@ -219,9 +216,9 @@ class Context:
         return self._root
 
     @property
-    def compiler(self) -> Compiler:
-        """The compiler attached to this Context."""
-        return self._compiler
+    def resolver(self) -> Resolver:
+        """The resolver attached to this Context."""
+        return self._resolver
 
     # ------------------------------------------------------------------
     # Serialization
@@ -232,12 +229,12 @@ class Context:
         return {"root": self._root.to_dict()}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any], compiler: Compiler | None = None) -> "Context":
+    def from_dict(cls, data: dict[str, Any], resolver: Resolver | None = None) -> "Context":
         """Deserialize a :class:`Context` from a plain dictionary."""
         from context_compiler.ast.nodes import _node_from_dict
 
         root = _node_from_dict(data["root"])
-        return cls(root=root, compiler=compiler)
+        return cls(root=root, resolver=resolver)
 
     def __repr__(self) -> str:
         return f"Context(root={self._root!r})"

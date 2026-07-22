@@ -4,10 +4,10 @@ import pytest
 
 from context_compiler.ast.nodes import MappingNode, ScalarNode, SequenceNode
 from context_compiler.ast.paths import Path
-from context_compiler.ast.prompt_node import PromptNode, PromptNodeState
+from context_compiler.ast.resolvable_node import ResolvableNode, ResolvableNodeState
 from context_compiler.ast.schema import Schema, FieldSpec
-from context_compiler.compiler.compiler import Compiler
-from context_compiler.compiler.passes import InferencePass
+from context_compiler.query.resolver import Resolver
+from context_compiler.query.passes import ResolutionPass
 from context_compiler.context.context import Context, NodeNotFoundError
 from context_compiler.inference.mock_provider import MockProvider
 from context_compiler.templates.template import Template, TemplateRegistry
@@ -42,20 +42,20 @@ def nested_context():
 
 
 @pytest.fixture
-def prompt_context():
-    """A context with a PromptNode wired up to a mock provider."""
+def resolvable_context():
+    """A context with a ResolvableNode wired up to a mock provider."""
     schema = Schema(
         name="GreetSchema",
         fields=[FieldSpec("greeting", type="str", required=True)],
     )
-    prompt = PromptNode(
+    node = ResolvableNode(
         template_ref="greet",
         input_bindings={"name": Path("name")},
         output_schema=schema,
     )
     root = MappingNode({
         "name": ScalarNode("Carol"),
-        "greeting": prompt,
+        "greeting": node,
     })
 
     registry = TemplateRegistry()
@@ -64,8 +64,8 @@ def prompt_context():
     mock = MockProvider(
         responses={"Say hello to Carol.": {"greeting": "Hello, Carol!"}},
     )
-    compiler = Compiler(template_registry=registry, passes=[InferencePass(mock)])
-    return Context(root=root, compiler=compiler)
+    resolver = Resolver(template_registry=registry, passes=[ResolutionPass(mock)])
+    return Context(root=root, resolver=resolver)
 
 
 # ---------------------------------------------------------------------------
@@ -121,51 +121,51 @@ class TestContextSet:
 
 
 # ---------------------------------------------------------------------------
-# PromptNode compilation
+# ResolvableNode resolution
 # ---------------------------------------------------------------------------
 
 
-class TestContextPromptNode:
-    def test_query_triggers_inference(self, prompt_context):
-        node = prompt_context.query(Path("greeting"))
-        assert isinstance(node, PromptNode)
-        assert node.prompt_state is PromptNodeState.RESOLVED
+class TestContextResolvableNode:
+    def test_query_triggers_resolution(self, resolvable_context):
+        node = resolvable_context.query(Path("greeting"))
+        assert isinstance(node, ResolvableNode)
+        assert node.resolution_state is ResolvableNodeState.RESOLVED
         result = node.result
         assert result is not None
 
-    def test_resolved_greeting_value(self, prompt_context):
-        node = prompt_context.query(Path("greeting"))
-        assert isinstance(node, PromptNode)
+    def test_resolved_greeting_value(self, resolvable_context):
+        node = resolvable_context.query(Path("greeting"))
+        assert isinstance(node, ResolvableNode)
         greeting = node.result.get("greeting").value  # type: ignore[union-attr]
         assert greeting == "Hello, Carol!"
 
-    def test_provider_called_once(self, prompt_context):
-        prompt_context.query(Path("greeting"))
-        # Get the mock provider via the compiler pass.
-        inference_pass = prompt_context.compiler._passes[0]
-        assert inference_pass.provider.call_count == 1
+    def test_provider_called_once(self, resolvable_context):
+        resolvable_context.query(Path("greeting"))
+        # Get the mock provider via the resolver pass.
+        resolution_pass = resolvable_context.resolver._passes[0]
+        assert resolution_pass.provider.call_count == 1
 
-    def test_second_query_served_from_cache(self, prompt_context):
-        n1 = prompt_context.query(Path("greeting"))
-        n2 = prompt_context.query(Path("greeting"))
+    def test_second_query_served_from_cache(self, resolvable_context):
+        n1 = resolvable_context.query(Path("greeting"))
+        n2 = resolvable_context.query(Path("greeting"))
         assert n1 is n2
         # Provider should still have been called only once.
-        inference_pass = prompt_context.compiler._passes[0]
-        assert inference_pass.provider.call_count == 1
+        resolution_pass = resolvable_context.resolver._passes[0]
+        assert resolution_pass.provider.call_count == 1
 
-    def test_mutation_marks_prompt_stale(self, prompt_context):
-        prompt_context.query(Path("greeting"))
+    def test_mutation_marks_node_stale(self, resolvable_context):
+        resolvable_context.query(Path("greeting"))
         # Mutate the dependency.
-        prompt_context.set(Path("name"), ScalarNode("Frank"))
+        resolvable_context.set(Path("name"), ScalarNode("Frank"))
         # Inspect the node in the tree directly without re-querying,
-        # because querying would trigger re-compilation (which would
+        # because querying would trigger re-resolution (which would
         # fail since the mock has no canned response for "Frank").
-        from context_compiler.compiler.compiler import _resolve_path
+        from context_compiler.query.resolver import _resolve_path
 
-        greeting_node = _resolve_path(prompt_context.root, Path("greeting"))
-        assert isinstance(greeting_node, PromptNode)
+        greeting_node = _resolve_path(resolvable_context.root, Path("greeting"))
+        assert isinstance(greeting_node, ResolvableNode)
         # Node should be stale: cache is invalidated and result is cleared.
-        assert greeting_node.prompt_state is PromptNodeState.STALE
+        assert greeting_node.resolution_state is ResolvableNodeState.STALE
 
 
 # ---------------------------------------------------------------------------

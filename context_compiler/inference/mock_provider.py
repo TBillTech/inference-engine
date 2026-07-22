@@ -22,11 +22,6 @@ from context_compiler.inference.provider import (
     ResolutionResult,
 )
 
-# Backward-compatible aliases re-exported for convenience.
-InferenceProvider = ResolutionProvider
-InferenceRequest = ResolutionRequest
-InferenceResponse = ResolutionResult
-
 
 class MockProvider(ResolutionProvider):
     """
