@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "context-compiler"
+version = "0.1.0"
+description = "A demand-driven, incremental compiler over a typed semantic tree for LLM-driven applications."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["context_compiler*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
