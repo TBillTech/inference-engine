@@ -144,14 +144,14 @@ class DependencyGraph:
         def dfs(node: Path) -> bool:
             if node in visited:
                 return False
-            if node in (set(path)):
+            if node in path:
                 # Found cycle – extract it.
                 cycle_start = path.index(node)
                 return True  # signal: check `path`
 
             path.append(node)
             for dep in self._edges.get(node, set()):
-                if dep in set(path):
+                if dep in path:
                     path.append(dep)
                     return True
                 if dfs(dep):
