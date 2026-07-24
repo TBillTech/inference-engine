@@ -1,22 +1,28 @@
 """
-Little House in the Eerie – multi-query REPL demonstrating lazy AST inference.
+Little House in the Eerie – A solor Horror Investigation.
 
-This example shows how the inference engine resolves a structured Context lazily,
-using multiple queries that correspond to AST subtrees.  Each ``look`` command
-triggers :meth:`~context_resolver.context.context.Context.query` for the
-relevant subtree; ResolvableNodes (PromptNodes) resolve only the first time they
-are queried and cache their results in the AST for subsequent calls.
+This program implements a solo RPG where the player investigates the paranormal
+in a small town somewhere -- eerie.
 
 Run with::
 
-    python -m context_resolver.examples.little_house_in_the_eerie
+    python -m apps.little_house_in_the_eerie.little_house_in_the_eerie
 
 Or pipe a script through stdin for non-interactive use::
 
     echo -e "look scene\\nlook event\\nchoose action 2\\nquit" | \\
-        python -m context_resolver.examples.little_house_in_the_eerie
+        python -m apps.little_house_in_the_eerie.little_house_in_the_eerie
 
-Commands
+Introduction Commands
+--------
+help
+look wakeup_scene
+look atmosphere
+look status
+question <text>
+quit / exit
+
+Story Mode Commands
 --------
 help                  Show available commands.
 look notebook         Investigator's narrative notebook (case, motivation, clues).
@@ -118,48 +124,6 @@ def _scalar(ctx: Context, *segments: str) -> Any:
 def build_initial_context() -> Context:
     """
     Construct the opening game state as a Context AST.
-
-    The tree mixes three kinds of nodes:
-
-    * **Fully-specified ScalarNodes** – deterministic game state (name, stats, …).
-    * **SequenceNodes** – ordered collections (clues, NPCs, available actions).
-    * **ResolvableNodes** (PromptNodes) – lazily resolved via the MockProvider:
-
-      - ``investigator.secrets``  – depends on investigator name + case title.
-      - ``atmosphere.vibe``       – depends on weather + time of day.
-      - ``scene.sensory``         – depends on location + time of day.
-
-    Tree layout::
-
-        root
-        ├── investigator
-        │   ├── name          ScalarNode("Doris Waverly")
-        │   ├── occupation    ScalarNode("Former Detective")
-        │   ├── sanity        ScalarNode(85)
-        │   ├── health        ScalarNode(90)
-        │   ├── instability   ScalarNode(2)
-        │   ├── secrets       ResolvableNode("investigator_secrets")  ← PromptNode
-        │   └── clues         SequenceNode([…])
-        ├── case
-        │   ├── title         ScalarNode("The Ashen Lane Affair")
-        │   └── motivation    ScalarNode("Your sister vanished …")
-        ├── atmosphere
-        │   ├── time_of_day   ScalarNode("Dusk")
-        │   ├── weather       ScalarNode("Overcast, with a cold drizzle")
-        │   └── vibe          ResolvableNode("atmosphere_vibe")       ← PromptNode
-        ├── scene
-        │   ├── location      ScalarNode("The abandoned house on Ashen Lane")
-        │   ├── episode       ScalarNode(1)
-        │   ├── sensory       ResolvableNode("scene_sensory")         ← PromptNode
-        │   └── npcs          SequenceNode([MappingNode(…)])
-        ├── event
-        │   ├── current       ScalarNode("Investigation Progress")
-        │   ├── progress      ScalarNode("You see a suspect at the Location")
-        │   ├── consequences  ScalarNode(None)  ← underspecified
-        │   └── escalation    ScalarNode(1)
-        └── action
-            ├── available     SequenceNode([four action strings])
-            └── chosen        ScalarNode(None)  ← underspecified
     """
     # ------------------------------------------------------------------
     # Output schemas for the three ResolvableNodes
@@ -589,7 +553,17 @@ def run_repl(ctx: Context) -> None:
     print("  A Solo Horror Investigation")
     print("=" * 60)
     print()
-    print("The abandoned house on Ashen Lane looms before you.")
+    print("You wake up with a dry mouth, and sticky eyes.  Gradually, the room comes into focus.")
+    print("You sit up in a soft, clean bed, in a small room, with rustic furnishings.")
+    print("An old woman in a flower dress is rocking in a chair, watching you as you awake.")
+    print("She seems relived so see you stirring.")
+    print("You try to remember how you got here; it is gradually coming back to you.")
+    print('The woman says, "Hello, my name is Mable Jenners. I\'m sorry we had to meet under such ... frightening circumstances."')
+    print('She continues, "How are you feeling?"')
+    print('You reply, "Ugh. Minor pains all over. I feel like I was in a car wreck!"')
+    print('Mable responds, "Oh, dear! Well, that is because _you were_ in a car wreck! I must say!"')
+    print('You reply, "Oh, wow! Uh ... where am I?"')
+    print('Mable replies, "Well, what do you remember?"')
     print("Type 'help' for commands.\n")
 
     gm_message: str | None = None
