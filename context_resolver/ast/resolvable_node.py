@@ -27,7 +27,8 @@ from typing import Any
 
 from context_resolver.ast.nodes import Node, NodeState
 from context_resolver.ast.paths import Path
-from context_resolver.ast.schema import Schema
+from context_resolver.ast.schema import Schema, FieldSpec
+from context_resolver.templates.template import Template
 
 
 class ResolvableNodeState(Enum):
@@ -76,18 +77,40 @@ class ResolvableNode(Node):
 
     def __init__(
         self,
-        template_ref: str,
-        input_bindings: dict[str, Path] | None = None,
+        template: str | Template | None = None,
         output_schema: Schema | None = None,
+        input_bindings: dict[str, Path] | None = None,
         dependencies: list[Path] | None = None,
         *,
+        template_ref: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(metadata=metadata)
-        self.template_ref: str = template_ref
+
+        # Backward-compatible constructor:
+        # - preferred: ResolvableNode(template, schema, ...)
+        # - legacy:    ResolvableNode(template_ref="name", ...)
+        resolved_template_ref: str | None = template_ref
+        self.template: Template | None = None
+        if isinstance(template, Template):
+            self.template = template
+            resolved_template_ref = template.name
+        elif isinstance(template, str):
+            resolved_template_ref = template
+
+        if not resolved_template_ref:
+            raise ValueError(
+                "ResolvableNode requires a Template (or template name). "
+                "Pass it as the first argument or via template_ref=."
+            )
+
+        self.template_ref: str = resolved_template_ref
         self.input_bindings: dict[str, Path] = dict(input_bindings or {})
         self.output_schema: Schema | None = output_schema
         self.dependencies: list[Path] = list(dependencies or [])
+        self._configured: bool = not (
+            input_bindings is None and dependencies is None
+        )
 
         # Runtime state
         self._resolution_state: ResolvableNodeState = ResolvableNodeState.PENDING
@@ -96,6 +119,90 @@ class ResolvableNode(Node):
         self._resolved_at: datetime.datetime | None = None
         self._provider: str | None = None
         self._model: str | None = None
+
+    # ------------------------------------------------------------------
+    # Configuration lifecycle
+    # ------------------------------------------------------------------
+
+    def is_configured(self) -> bool:
+        """Return ``True`` when this node has bindings and dependencies set."""
+        return self._configured
+
+    def configure(self, context: Any) -> None:
+        """
+        Configure this node from template placeholders and Context paths.
+
+        This infers ``input_bindings`` from placeholder fields in the template
+        that map exactly to existing Context paths, then derives
+        ``dependencies`` from those bindings.
+        """
+        if self._configured:
+            return
+
+        template = self.template
+        if template is None:
+            template = context.resolver.template_registry.get(self.template_ref)
+            if template is None:
+                raise ValueError(
+                    f"Template {self.template_ref!r} not found; "
+                    "cannot auto-configure ResolvableNode."
+                )
+
+        self.input_bindings = template.infer_input_bindings(context)
+        self.dependencies = context.dependencies_for_input_bindings(self.input_bindings)
+        self._configured = True
+
+    def _match_path(self, segments: tuple[str | int, ...]) -> bool:
+        """
+        Match child path segments without forcing resolution.
+
+        If a resolved result exists, delegate to that result. Otherwise, match
+        one level deep against the output schema field names.
+        """
+        if not segments:
+            return True
+
+        if self._result is not None:
+            return self._result._match_path(segments)
+
+        head = segments[0]
+        if not isinstance(head, str):
+            return False
+        if self.output_schema is None:
+            return False
+
+        return self._match_schema_path(self.output_schema, segments)
+
+    def _match_schema_path(
+        self,
+        schema: Schema,
+        segments: tuple[str | int, ...],
+    ) -> bool:
+        if not segments:
+            return True
+
+        head = segments[0]
+        if not isinstance(head, str):
+            return False
+
+        field_spec: FieldSpec | None = None
+        for field in schema.fields:
+            if field.name == head:
+                field_spec = field
+                break
+
+        if field_spec is None:
+            return False
+
+        tail = segments[1:]
+        if not tail:
+            return True
+
+        # Descend only when this field references another Schema.
+        if isinstance(field_spec.type, Schema):
+            return self._match_schema_path(field_spec.type, tail)
+
+        return False
 
     # ------------------------------------------------------------------
     # ResolvableNode state
@@ -215,12 +322,13 @@ class ResolvableNode(Node):
 
     def _copy_with_metadata(self, metadata: dict[str, Any]) -> "ResolvableNode":
         node = ResolvableNode(
-            self.template_ref,
-            input_bindings=self.input_bindings,
+            self.template or self.template_ref,
             output_schema=self.output_schema,
+            input_bindings=self.input_bindings,
             dependencies=self.dependencies,
             metadata=metadata,
         )
+        node._configured = self._configured
         node._resolution_state = self._resolution_state
         node._result = self._result
         node._error = self._error
@@ -240,6 +348,7 @@ class ResolvableNode(Node):
                 self.output_schema.to_dict() if self.output_schema else None
             ),
             "dependencies": [list(p.segments) for p in self.dependencies],
+            "configured": self._configured,
             "resolution_state": self._resolution_state.name,
             "result": self._result.to_dict() if self._result is not None else None,
             "error": str(self._error) if self._error else None,
@@ -266,11 +375,12 @@ class ResolvableNode(Node):
         )
         node = cls(
             template_ref=data["template_ref"],
-            input_bindings=input_bindings,
             output_schema=output_schema,
+            input_bindings=input_bindings,
             dependencies=dependencies,
             metadata=data.get("metadata"),
         )
+        node._configured = data.get("configured", node._configured)
         state_key = data.get("resolution_state", "PENDING")
         node._resolution_state = ResolvableNodeState[state_key]
         if data.get("result") is not None:
@@ -286,6 +396,7 @@ class ResolvableNode(Node):
     def __repr__(self) -> str:
         return (
             f"ResolvableNode(template_ref={self.template_ref!r}, "
+            f"configured={self._configured}, "
             f"resolution_state={self._resolution_state.name})"
         )
 

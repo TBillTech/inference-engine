@@ -49,10 +49,11 @@ from context_resolver.ast.paths import Path
 from context_resolver.ast.resolvable_node import ResolvableNode, ResolvableNodeState
 from context_resolver.ast.schema import FieldSpec, Schema
 from context_resolver.context.context import Context
-from context_resolver.inference.mock_provider import MockProvider
 from context_resolver.query.passes import ResolutionPass
 from context_resolver.query.resolver import Resolver, _resolve_path
-from context_resolver.templates.template import Template, TemplateRegistry
+from context_resolver.inference.llama_cpp_provider import LocalLlamaCppProvider
+from context_resolver.inference.strategy import PromptStrategy
+from context_resolver.templates.template import TemplateRegistry, JSONOutputTemplate
 
 _SEP = "-" * 60
 _ORACLE_ANSWERS = [
@@ -61,7 +62,6 @@ _ORACLE_ANSWERS = [
     "No, but … you gain some unexpected advantage.",
     "No, and … the situation worsens.",
 ]
-
 
 # ---------------------------------------------------------------------------
 # Node display helpers (no inference triggered)
@@ -120,16 +120,63 @@ def _scalar(ctx: Context, *segments: str) -> Any:
 # Context construction
 # ---------------------------------------------------------------------------
 
+place_holder = ScalarNode(None)
 
 def build_initial_context() -> Context:
     """
     Construct the opening game state as a Context AST.
     """
-    # ------------------------------------------------------------------
-    # Output schemas for the three ResolvableNodes
-    # ------------------------------------------------------------------
-    secrets_schema = Schema(
-        name="InvestigatorSecrets",
+    brochure_schema = Schema(
+        name="TownBrochure",
+        fields=[
+            FieldSpec(
+                name="name",
+                type="str",
+                required=True,
+                decription="The Town name is composed of at least two parts, with an optional third part",
+            ),
+            FieldSpec(
+                name="location",
+                type="str",
+                required=True,
+                description="Where is the town located atmospherically (exact geography is left vague)"
+            ),
+            FieldSpec(
+                name="economic",
+                type="str",
+                require=True,
+                description="The Economic foundation of the town"
+            ),
+            FieldSpec(
+                name="backstory",
+                type="str",
+                require=True,
+                description="The dark backstory of the town (possibly paranormal)"
+            ),
+        ],
+        description="Output schema for a town in the brochure (possible nearby location for the house)"
+    )
+
+    case_schema = Schema(
+        name="CaseHeadline",
+        fields=[
+            FieldSpec(
+                name="name",
+                type="str",
+                require=True,
+                desription="The headline for the case under investigation relating to this town"
+            ),
+            FieldSpec(
+                name="description",
+                type="str",
+                require=True,
+                description="The sensational (and superficial) description of the case."
+            )
+        ],
+    )
+
+    secret_schema = Schema(
+        name="InvestigatorSecret",
         fields=[
             FieldSpec(
                 name="secret",
@@ -138,8 +185,9 @@ def build_initial_context() -> Context:
                 description="A dark personal secret the investigator carries",
             ),
         ],
-        description="Output schema for investigator_secrets template",
+        description="Output schema for investigator_secret template",
     )
+
     vibe_schema = Schema(
         name="AtmosphereVibe",
         fields=[
@@ -152,29 +200,21 @@ def build_initial_context() -> Context:
         ],
         description="Output schema for atmosphere_vibe template",
     )
-    sensory_schema = Schema(
-        name="SceneSensory",
-        fields=[
-            FieldSpec(
-                name="description",
-                type="str",
-                required=True,
-                description="Vivid sensory details of the scene",
-            ),
-        ],
-        description="Output schema for scene_sensory template",
+
+    brochure_node = ResolvableNode(
+        template_ref="town_brochure",
+        input_bindings={}
+        output_schema=brochure_schema,
+        dependencies=[]
     )
 
-    # ------------------------------------------------------------------
-    # PromptNode 1 – investigator's dark secret
-    # ------------------------------------------------------------------
-    secrets_node = ResolvableNode(
+    secret_node = ResolvableNode(
         template_ref="investigator_secrets",
         input_bindings={
             "investigator_name": Path("investigator", "name"),
             "case_title": Path("case", "title"),
         },
-        output_schema=secrets_schema,
+        output_schema=secret_schema,
         dependencies=[
             Path("investigator", "name"),
             Path("case", "title"),
@@ -217,41 +257,99 @@ def build_initial_context() -> Context:
     # Full AST
     # ------------------------------------------------------------------
     root = MappingNode({
-        "investigator": MappingNode({
-            "name": ScalarNode("Doris Waverly"),
-            "occupation": ScalarNode("Former Detective"),
-            "sanity": ScalarNode(85),
-            "health": ScalarNode(90),
-            "instability": ScalarNode(2),
-            "secrets": secrets_node,               # PromptNode
-            "clues": SequenceNode([
-                ScalarNode("A torn photograph found near the front gate"),
-            ]),
+        "interview": MappingNode({
+            "destination_hint": ScalarNode(" somewhere remote "),
+            "brochure1": brochure_node,
+            "brochure1": brochure_node,
+            "brochure1": brochure_node,
+            "brochure1": brochure_node,
+            "case1": case_node,
+            "case2": case_node,
+            "case3": case_node,
+            "case4": case_node,
+        }),
+        "town": MappingNode({
+            "name": place_holder,
+            "location": place_holder,
+            "economic": place_holder,
+            "backstory": place_holder,
         }),
         "case": MappingNode({
-            "title": ScalarNode("The Ashen Lane Affair"),
-            "motivation": ScalarNode(
-                "Your sister vanished near this house three months ago."
-            ),
+            "name": place_holder,
+            "description": place_holder
+        })
+        "investigator": MappingNode({
+            "first_name": place_holder,
+            "last_name": place_holder,
+            "archetype": archetype_node,
+            "attributes": attributes_node,
+            "wounds": ScalarNode(0),
+            "instability": ScalarNode(0),
+            "luck": ScalarNode(9),
+            "secrets": place_holder,
+            "interest": interest_node,
+            "advantages": SequenceNode([]),
+            "disadvantages": SequenceNode([])
+        }),
+        "notebook": MappingNode({
+            "logbook": SequenceNode([]),
+            "daybook": SequenceNode([]),
+            "diary": SequenceNode([]),
+            "clues": SequenceNode([])
+        }),
+        "public": MappingNode({
+            "rumors": SequenceNode([]),
+            "conspiracies": SequenceNode([]),
+            "player": SequenceNode([])
+        })
+        "locations": MappingNode({
+            "Little House": MappingNode({
+                "name": ScalarNode("Little House"),
+                "description": little_house_description_node
+            })
+        }),
+        "npcs": MappingNode({
+            "Mable Jenner": MappingNode({
+                "first_name": ScalarNode("Mable"),
+                "last_name": ScalarNode("Jenner"),
+                "archetype": ScalarNode("Elderly Citizen"),
+                "attitude": ScalarNode(5),
+                "personality": ScalarNode("Clumsy"),
+                "motivation": ScalarNode("Duty"),
+                "location": ScalarNode("Little House")
+            }),
+            "Daryl Jenner": MappingNode({
+                "first_name": ScalarNode("Daryl"),
+                "last_name": ScalarNode("Jenner"),
+                "archetype": ScalarNode("Elderly Citizen"),
+                "attitude": ScalarNode(4),
+                "personality": ScalarNode("Introverted"),
+                "motivation": ScalarNode("Survival"),
+                "location": ScalarNode("Little House")
+            })
         }),
         "atmosphere": MappingNode({
-            "time_of_day": ScalarNode("Dusk"),
-            "weather": ScalarNode("Overcast, with a cold drizzle"),
-            "vibe": vibe_node,                     # PromptNode
+            "hour_of_day": ScalarNode(8),
+            "minute_of_day": ScalarNode(20),
+            "post_meridian": ScalarNode(False),
+            "weather": weather_node,
+            "vibe": vibe_node,
+            "time_limit": ScalarNode(6),
+            "urgency": urgency_node,
         }),
         "scene": MappingNode({
-            "location": ScalarNode("The abandoned house on Ashen Lane"),
-            "episode": ScalarNode(1),
-            "sensory": sensory_node,               # PromptNode
-            "npcs": SequenceNode([
-                MappingNode({
-                    "name": ScalarNode("Shadowy Figure"),
-                    "doing": ScalarNode("watching from an upstairs window"),
-                }),
-            ]),
+            "location": ScalarNode("Little House"),
+            "specifics": ScalarNode("You are sitting in a soft bed in a bedroom in the Little House,"
+                " chatting with Mable Jenners.")
+            "elements": SequenceNode(["Mable on rocking chair", "newspaper within reach", 
+                "comfortable bed", "my suitcase", "eclectic electric lamp", 
+                "alarm clock reading 8:20 A.M.", "Mable holding a bible with a bookmark",
+                "something about the light and the view of outside from the window feels eerie"]),
+            "npcs": SequenceNode(["Mable Jenner"]),
+            "description": scene_node
         }),
         "event": MappingNode({
-            "current": ScalarNode("Investigation Progress"),
+            "description": ScalarNode("Investigation Progress"),
             "progress": ScalarNode("You see a suspect at the Location"),
             "consequences": ScalarNode(None),      # underspecified
             "escalation": ScalarNode(1),
@@ -270,18 +368,54 @@ def build_initial_context() -> Context:
     # ------------------------------------------------------------------
     # Template registry
     # The template strings use Python str.format_map substitution.
-    # The rendered prompts below are what the MockProvider matches against.
     # ------------------------------------------------------------------
     registry = TemplateRegistry()
-    registry.register(Template(
-        name="investigator_secrets",
+    registry.register(JSONOutputTemplate(
+        name="town_brochure",
         template_str=(
-            "You are the Co-GM for a horror investigation game. "
-            "Generate a dark personal secret for investigator {investigator_name}, "
-            "who is investigating the case titled '{case_title}'."
+            "Your are the Co-GM for a paranormal investigation game centered on a little town."
+            "Choose a location {interview.destination_hint}, and remember to keep it isolated and preferably hidden "
+            "from the rest of the world; that’s how its inhabitants like to live. For example, "
+            "the location could be vast desert near 7 shooter peak, OR concealed in a dense forest "
+            "near terror falls, OR in a canyon near the cliffs of twilight, OR on a remote island etc...  "
+            "Choose a name for it, like Sapphire Bluffs or Little Hill Marsh."
+            "Invent the Economic basis for the town in just a few words, for example Diary Farming OR Mining OR ..."
+            "The Town has a dark backstory that the townsfolk seem to have forgotten or keep hiding."
+            "For example, it was once a hub for smuggling operations, OR maybe they had witch trials, OR"
+            "organized crime controls local busineses, OR something else equally scandalous."
+        ),
+        description="Generates a brochure for one of the towns the player can investigate."
+    ))
+
+    registry.register(JSONOutputTemplate(
+        name="town_case",
+        template_str=(
+            "You are a Co-GM for a paranormal investigation game centered on a little town."
+            "The town is named {town.name}, situated in: "
+            "{town.location}"
+            "For their livelihood, the denizens rely on: "
+            "{town.economy}"
+            "Those who know about the town are aware that: "
+            "{town.backstory}"
+            "Invent a Case to be investigated by a paranormal investigator, (surface level, not the root). "
+            "Life in the Town is calm and slow, like trees swaying in the wind. "
+            "However, the peaceful routine of its inhabitants was recently disturbed by an extraordinary "
+            "event, rooted in a case for the investigator to delve into. For example, maybe a person is missing, "
+            "OR someone is kidnapped, OR mysterious power outages, etc... What is the headline that "
+            "drew the investigator here?"
+        )
+    ))
+
+    registry.register(Template(
+        name="investigator_secret",
+        template_str=(
+            "You are the Co-GM for a paranormal investigation game. "
+            "Generate a dark personal secret for investigator {investigator.first_name} {investigator.last_name}, "
+            "who is investigating the case titled '{case.name}'."
         ),
         description="Generates a secret backstory element for the investigator",
     ))
+
     registry.register(Template(
         name="atmosphere_vibe",
         template_str=(
@@ -290,6 +424,7 @@ def build_initial_context() -> Context:
         ),
         description="Generates a one-line atmospheric description",
     ))
+
     registry.register(Template(
         name="scene_sensory",
         template_str=(
@@ -300,61 +435,21 @@ def build_initial_context() -> Context:
     ))
 
     # ------------------------------------------------------------------
-    # MockProvider – pre-configured responses for every PromptNode.
-    #
-    # Keys are the exact rendered prompts produced by Template.render().
-    # The default_response acts as a safety net for any unmatched prompt.
+    # LLMResolver
     # ------------------------------------------------------------------
-    mock_provider = MockProvider(
-        responses={
-            # investigator_secrets rendered with Doris Waverly / The Ashen Lane Affair
-            (
-                "You are the Co-GM for a horror investigation game. "
-                "Generate a dark personal secret for investigator Doris Waverly, "
-                "who is investigating the case titled 'The Ashen Lane Affair'."
-            ): {
-                "secret": (
-                    "Doris knows her sister was not taken by chance – "
-                    "she unknowingly led the cult to the house herself."
-                ),
-            },
-            # atmosphere_vibe rendered with Dusk / Overcast, with a cold drizzle
-            (
-                "Describe the atmosphere of a horror investigation scene in one evocative "
-                "sentence. The time is Dusk. The weather is: Overcast, with a cold drizzle."
-            ): {
-                "vibe": (
-                    "The dying light bleeds through grey clouds, turning the drizzle "
-                    "to silver needles that prick the skin and whisper of things "
-                    "better left unseen."
-                ),
-            },
-            # scene_sensory rendered with The abandoned house on Ashen Lane / Dusk
-            (
-                "Describe the sensory details of the following location in one vivid "
-                "sentence. Location: The abandoned house on Ashen Lane. Time of day: Dusk."
-            ): {
-                "description": (
-                    "A faint smell of mildew and cold ash seeps from the cracked doorway, "
-                    "while the wind makes the broken shutters clatter like dry bones."
-                ),
-            },
-        },
-        default_response={
-            # Fallback values satisfy each schema's required field in case the
-            # rendered prompt does not match a key (e.g. after game-state changes).
-            "secret": "(no response – prompt key not matched)",
-            "vibe": "(no response – prompt key not matched)",
-            "description": "(no response – prompt key not matched)",
-        },
+    # --- Local llama.cpp provider wired through PromptStrategy ---
+    # Swapping to a different provider (e.g. OpenAIProvider) requires only
+    # changing the constructor call below; the strategy and resolver layers
+    # remain unchanged.
+    llama_provider = LocalLlamaCppProvider(
+        base_url=None,
+        model=None,
     )
+    strategy = PromptStrategy(llama_provider)
 
-    # ------------------------------------------------------------------
-    # Resolver
-    # ------------------------------------------------------------------
     resolver = Resolver(
         template_registry=registry,
-        passes=[ResolutionPass(mock_provider)],
+        passes=[ResolutionPass(strategy)],
     )
 
     return Context(root=root, resolver=resolver)

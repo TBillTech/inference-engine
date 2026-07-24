@@ -99,6 +99,11 @@ class Resolver:
         """The live dependency graph maintained by this resolver."""
         return self._dependency_graph
 
+    @property
+    def template_registry(self) -> TemplateRegistry:
+        """The template registry used during resolution."""
+        return self._template_registry
+
     # ------------------------------------------------------------------
     # Core resolution
     # ------------------------------------------------------------------
@@ -191,7 +196,7 @@ class Resolver:
             bound_values[var_name] = _extract_scalar(dep_node)
 
         # Look up and render the template.
-        template = self._template_registry.get(node.template_ref)
+        template = node.template or self._template_registry.get(node.template_ref)
         if template is None:
             raise ResolutionError(
                 f"Template {node.template_ref!r} not found in registry"
@@ -271,6 +276,16 @@ def _resolve_path(root: Node, path: Path) -> Node | None:
         else:
             return None
     return current
+
+
+def _match_path(root: Node, path: Path) -> bool:
+    """
+    Return ``True`` when *path* can be matched without triggering resolution.
+
+    Unlike :func:`_resolve_path`, this can traverse unresolved
+    :class:`ResolvableNode` instances using their output schema.
+    """
+    return root._match_path(path.segments)
 
 
 def _extract_scalar(node: Node) -> Any:

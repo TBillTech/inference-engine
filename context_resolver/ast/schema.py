@@ -19,7 +19,7 @@ them with coercions, cross-field constraints, or references to other schemas.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ class FieldSpec:
     type:
         A string tag describing the expected Python type
         (``"str"``, ``"int"``, ``"float"``, ``"bool"``, ``"list"``,
-        ``"mapping"``, or the name of a nested schema).
+        ``"mapping"``), or a nested :class:`Schema` reference.
     required:
         If ``True``, a :class:`SchemaValidationError` is raised when the field
         is absent from the raw data.
@@ -48,15 +48,20 @@ class FieldSpec:
     """
 
     name: str
-    type: str = "str"
+    type: str | "Schema" = "str"
     required: bool = True
     description: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize this field spec to a plain dictionary."""
+        encoded_type: str | dict[str, Any]
+        if isinstance(self.type, Schema):
+            encoded_type = {"schema": self.type.to_dict()}
+        else:
+            encoded_type = self.type
         return {
             "name": self.name,
-            "type": self.type,
+            "type": encoded_type,
             "required": self.required,
             "description": self.description,
         }
@@ -64,9 +69,15 @@ class FieldSpec:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "FieldSpec":
         """Deserialize a :class:`FieldSpec` from a plain dictionary."""
+        raw_type = data.get("type", "str")
+        parsed_type: str | Schema
+        if isinstance(raw_type, dict) and "schema" in raw_type:
+            parsed_type = Schema.from_dict(raw_type["schema"])
+        else:
+            parsed_type = raw_type
         return cls(
             name=data["name"],
-            type=data.get("type", "str"),
+            type=parsed_type,
             required=data.get("required", True),
             description=data.get("description", ""),
         )
@@ -135,6 +146,15 @@ class Schema:
     def _check_type(self, spec: FieldSpec, value: Any) -> None:
         """Raise :class:`SchemaValidationError` if *value* has wrong type."""
         expected = spec.type
+        if isinstance(expected, Schema):
+            if not isinstance(value, dict):
+                raise SchemaValidationError(
+                    f"Schema '{self.name}': field '{spec.name}' expected nested "
+                    f"schema '{expected.name}' (dict), got {type(value).__name__!r}"
+                )
+            expected.validate(value)
+            return
+
         type_map: dict[str, type | tuple[type, ...]] = {
             "str": str,
             "int": int,
@@ -175,8 +195,20 @@ class Schema:
         }
 
         for spec in self.fields:
-            json_type = type_map.get(spec.type, "string")
-            prop: dict[str, Any] = {"type": json_type}
+            prop: dict[str, Any]
+            if isinstance(spec.type, Schema):
+                nested_schema = spec.type.to_json_schema()
+                prop = {
+                    "type": "object",
+                    "properties": nested_schema.get("properties", {}),
+                }
+                if "required" in nested_schema:
+                    prop["required"] = nested_schema["required"]
+                if "description" in nested_schema:
+                    prop["description"] = nested_schema["description"]
+            else:
+                json_type = type_map.get(spec.type, "string")
+                prop = {"type": json_type}
             if spec.description:
                 prop["description"] = spec.description
             properties[spec.name] = prop

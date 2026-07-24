@@ -20,10 +20,13 @@ Built-in template types
 
 from __future__ import annotations
 
+import string
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from context_resolver.ast.paths import Path
     from context_resolver.ast.schema import Schema
+    from context_resolver.context.context import Context
 
 
 class Template:
@@ -80,6 +83,29 @@ class Template:
                 f"Template '{self.name}' requires variable {exc} "
                 f"which is not present in bindings: {list(bindings.keys())}"
             ) from exc
+
+    def infer_input_bindings(self, context: "Context") -> dict[str, "Path"]:
+        """
+        Infer input bindings from ``{...}`` parameters that match Context paths.
+
+        A placeholder is treated as bindable only when it maps exactly to an
+        existing dotted path in the context tree, for example ``{player.name}``
+        -> ``Path("player", "name")``.
+        """
+        from context_resolver.ast.paths import Path
+
+        bindings: dict[str, Path] = {}
+        formatter = string.Formatter()
+        for _, field_name, _, _ in formatter.parse(self.template_str):
+            if not field_name:
+                continue
+            candidate = field_name.strip()
+            if not candidate:
+                continue
+            path = Path(*candidate.split("."))
+            if context.has_path(path):
+                bindings[candidate] = path
+        return bindings
 
     def to_dict(self) -> dict[str, str]:
         """Serialize this template to a plain dictionary."""

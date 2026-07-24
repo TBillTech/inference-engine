@@ -32,6 +32,18 @@ class TestFieldSpec:
         assert restored.required is False
         assert restored.description == "A score"
 
+    def test_nested_schema_type_roundtrip(self):
+        address = Schema(
+            name="Address",
+            fields=[FieldSpec(name="city", type="str", required=True)],
+        )
+        f = FieldSpec(name="address", type=address, required=True)
+
+        restored = FieldSpec.from_dict(f.to_dict())
+        assert isinstance(restored.type, Schema)
+        assert restored.type.name == "Address"
+        assert restored.type.fields[0].name == "city"
+
 
 class TestSchemaValidation:
     def test_valid_data_passes(self, person_schema):
@@ -62,6 +74,20 @@ class TestSchemaValidation:
         with pytest.raises(SchemaValidationError):
             schema.validate({"flag": "yes"})
 
+    def test_nested_schema_validation(self):
+        address_schema = Schema(
+            "Address",
+            fields=[FieldSpec("city", type="str", required=True)],
+        )
+        person_schema = Schema(
+            "Person",
+            fields=[FieldSpec("address", type=address_schema, required=True)],
+        )
+
+        person_schema.validate({"address": {"city": "Salem"}})
+        with pytest.raises(SchemaValidationError):
+            person_schema.validate({"address": "not-a-dict"})
+
 
 class TestJsonSchemaGeneration:
     def test_generates_valid_structure(self, person_schema):
@@ -81,6 +107,22 @@ class TestJsonSchemaGeneration:
         js = schema.to_json_schema()
         assert js["description"] == "Top-level description"
         assert js["properties"]["x"]["description"] == "An x value"
+
+    def test_nested_schema_generates_nested_object_properties(self):
+        profile = Schema(
+            "Profile",
+            fields=[FieldSpec("bio", type="str", required=True)],
+            description="Profile data",
+        )
+        schema = Schema(
+            "User",
+            fields=[FieldSpec("profile", type=profile, required=True)],
+        )
+
+        js = schema.to_json_schema()
+        assert js["properties"]["profile"]["type"] == "object"
+        assert "bio" in js["properties"]["profile"]["properties"]
+        assert "bio" in js["properties"]["profile"]["required"]
 
 
 class TestSchemaSerialization:

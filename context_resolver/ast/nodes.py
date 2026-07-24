@@ -51,6 +51,41 @@ class Node:
         self._metadata: dict[str, Any] = metadata or {}
 
     # ------------------------------------------------------------------
+    # Configuration lifecycle
+    # ------------------------------------------------------------------
+
+    def is_configured(self) -> bool:
+        """
+        Return ``True`` when this node is ready for use.
+
+        Most concrete nodes are trivially configured, so the default returns
+        ``True``. Deferred nodes (for example ``ResolvableNode``) can override
+        this and perform configuration during :class:`Context` construction.
+        """
+        return True
+
+    def configure(self, context: "Any") -> None:
+        """
+        Configure this node against a Context.
+
+        The default implementation is a no-op; subclasses may override.
+        """
+        return None
+
+    # ------------------------------------------------------------------
+    # Non-resolving path matching
+    # ------------------------------------------------------------------
+
+    def _match_path(self, segments: tuple[Union[str, int], ...]) -> bool:
+        """
+        Return ``True`` if *segments* can be matched from this node.
+
+        This method must not trigger any resolution. Subclasses that can
+        contain child nodes should recursively delegate to those children.
+        """
+        return len(segments) == 0
+
+    # ------------------------------------------------------------------
     # State
     # ------------------------------------------------------------------
 
@@ -173,6 +208,9 @@ class ScalarNode(Node):
     def __repr__(self) -> str:
         return f"ScalarNode(value={self._value!r}, state={self.state.name})"
 
+    def _match_path(self, segments: tuple[Union[str, int], ...]) -> bool:
+        return len(segments) == 0
+
 
 class MappingNode(Node):
     """
@@ -218,6 +256,17 @@ class MappingNode(Node):
     def __contains__(self, key: str) -> bool:
         return key in self._fields
 
+    def _match_path(self, segments: tuple[Union[str, int], ...]) -> bool:
+        if not segments:
+            return True
+        head = segments[0]
+        if not isinstance(head, str):
+            return False
+        child = self.get(head)
+        if child is None:
+            return False
+        return child._match_path(segments[1:])
+
     # ------------------------------------------------------------------
     # State
     # ------------------------------------------------------------------
@@ -258,6 +307,12 @@ class MappingNode(Node):
             f"state={self.state.name})"
         )
 
+def to_node(n):
+    if isinstance(n, str): 
+        return ScalarNode(n)
+    if isinstance(n, int):
+        return ScalarNode(n)
+    return n
 
 class SequenceNode(Node):
     """
@@ -278,7 +333,7 @@ class SequenceNode(Node):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(metadata=metadata)
-        self._items: list[Node] = list(items) if items else []
+        self._items: list[Node] = [to_node(i) for i in items] if items else []
 
     # ------------------------------------------------------------------
     # Item access
@@ -299,6 +354,17 @@ class SequenceNode(Node):
 
     def __iter__(self) -> Iterator[Node]:
         return iter(self._items)
+
+    def _match_path(self, segments: tuple[Union[str, int], ...]) -> bool:
+        if not segments:
+            return True
+        head = segments[0]
+        if not isinstance(head, int):
+            return False
+        child = self.get(head)
+        if child is None:
+            return False
+        return child._match_path(segments[1:])
 
     # ------------------------------------------------------------------
     # State

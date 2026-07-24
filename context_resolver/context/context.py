@@ -35,7 +35,7 @@ from context_resolver.ast.nodes import (
 )
 from context_resolver.ast.paths import Path
 from context_resolver.ast.resolvable_node import ResolvableNode
-from context_resolver.query.resolver import Resolver, _resolve_path
+from context_resolver.query.resolver import Resolver, _resolve_path, _match_path
 from context_resolver.query.dependency_graph import DependencyGraph
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,21 @@ class Context:
         self._root: Node = root or MappingNode()
         self._resolver: Resolver = resolver or Resolver()
         self._cache: dict[Path, Node] = {}
+        self._configure_unconfigured_nodes()
+
+    def _configure_unconfigured_nodes(self) -> None:
+        """Walk the tree and configure any node that is not yet configured."""
+        stack: list[Node] = [self._root]
+        while stack:
+            node = stack.pop()
+            if not node.is_configured():
+                node.configure(self)
+            if isinstance(node, MappingNode):
+                stack.extend(child for _, child in node.items())
+            elif isinstance(node, SequenceNode):
+                stack.extend(node)
+            elif isinstance(node, ResolvableNode) and node.result is not None:
+                stack.append(node.result)
 
     # ------------------------------------------------------------------
     # Tree mutation
@@ -190,6 +205,29 @@ class Context:
             self._cache[path] = resolved
 
         return resolved
+
+    def has_path(self, path: Path) -> bool:
+        """Return ``True`` when *path* exists in the Context tree."""
+        return _match_path(self._root, path)
+
+    def dependencies_for_input_bindings(
+        self, input_bindings: dict[str, Path]
+    ) -> list[Path]:
+        """
+        Build an ordered, de-duplicated dependency list for *input_bindings*.
+
+        Only bindings whose paths exist in the tree are included.
+        """
+        seen: set[Path] = set()
+        dependencies: list[Path] = []
+        for path in input_bindings.values():
+            if path in seen:
+                continue
+            if not self.has_path(path):
+                continue
+            seen.add(path)
+            dependencies.append(path)
+        return dependencies
 
     # ------------------------------------------------------------------
     # Convenience accessors

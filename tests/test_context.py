@@ -68,6 +68,29 @@ def resolvable_context():
     return Context(root=root, resolver=resolver)
 
 
+@pytest.fixture
+def auto_configured_context():
+    """A context where ResolvableNode bindings are inferred at construction time."""
+    schema = Schema(
+        name="GreetSchema",
+        fields=[FieldSpec("greeting", type="str", required=True)],
+    )
+    template = Template("greet", "Say hello to {name}.")
+    node = ResolvableNode(template, schema)
+    root = MappingNode({
+        "name": ScalarNode("Carol"),
+        "greeting": node,
+    })
+
+    registry = TemplateRegistry()
+    registry.register(template)
+    mock = MockProvider(
+        responses={"Say hello to Carol.": {"greeting": "Hello, Carol!"}},
+    )
+    resolver = Resolver(template_registry=registry, passes=[ResolutionPass(mock)])
+    return Context(root=root, resolver=resolver)
+
+
 # ---------------------------------------------------------------------------
 # Basic query tests
 # ---------------------------------------------------------------------------
@@ -95,6 +118,42 @@ class TestContextQueryScalar:
         n1 = simple_context.query(Path("name"))
         n2 = simple_context.query(Path("name"))
         assert n1 is n2
+
+    def test_has_path_matches_unresolved_resolvable_schema_field(self):
+        schema = Schema(
+            name="Out",
+            fields=[FieldSpec(name="vibe", type="str", required=True)],
+        )
+        unresolved = ResolvableNode(
+            template="vibe",
+            output_schema=schema,
+            input_bindings={},
+            dependencies=[],
+        )
+        ctx = Context(MappingNode({"atmosphere": unresolved}))
+
+        assert ctx.has_path(Path("atmosphere", "vibe")) is True
+        assert ctx.has_path(Path("atmosphere", "missing")) is False
+
+    def test_has_path_matches_nested_unresolved_resolvable_schema_field(self):
+        details_schema = Schema(
+            name="Details",
+            fields=[FieldSpec(name="smell", type="str", required=True)],
+        )
+        schema = Schema(
+            name="Out",
+            fields=[FieldSpec(name="details", type=details_schema, required=True)],
+        )
+        unresolved = ResolvableNode(
+            template="scene",
+            output_schema=schema,
+            input_bindings={},
+            dependencies=[],
+        )
+        ctx = Context(MappingNode({"scene": unresolved}))
+
+        assert ctx.has_path(Path("scene", "details", "smell")) is True
+        assert ctx.has_path(Path("scene", "details", "sound")) is False
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +225,13 @@ class TestContextResolvableNode:
         assert isinstance(greeting_node, ResolvableNode)
         # Node should be stale: cache is invalidated and result is cleared.
         assert greeting_node.resolution_state is ResolvableNodeState.STALE
+
+    def test_context_auto_configures_unconfigured_resolvable_node(self, auto_configured_context):
+        greeting_node = auto_configured_context.root.get("greeting")
+        assert isinstance(greeting_node, ResolvableNode)
+        assert greeting_node.is_configured()
+        assert greeting_node.input_bindings == {"name": Path("name")}
+        assert greeting_node.dependencies == [Path("name")]
 
 
 # ---------------------------------------------------------------------------

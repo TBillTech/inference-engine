@@ -4,6 +4,10 @@ import pytest
 
 from context_resolver.templates.template import Template, TemplateRegistry, JSONOutputTemplate
 from context_resolver.ast.schema import Schema, FieldSpec
+from context_resolver.ast.nodes import MappingNode, ScalarNode
+from context_resolver.ast.paths import Path
+from context_resolver.ast.resolvable_node import ResolvableNode
+from context_resolver.context.context import Context
 
 
 class TestTemplate:
@@ -31,6 +35,68 @@ class TestTemplate:
     def test_repr(self):
         t = Template("greet", "Hello!")
         assert "greet" in repr(t)
+
+    def test_infer_input_bindings_from_existing_paths(self):
+        t = Template("case", "Town: {town.name}; Weather: {atmosphere.weather}")
+        ctx = Context(
+            MappingNode(
+                {
+                    "town": MappingNode({"name": ScalarNode("Eerie")}),
+                    "atmosphere": MappingNode({"weather": ScalarNode("Fog")}),
+                }
+            )
+        )
+
+        bindings = t.infer_input_bindings(ctx)
+        assert bindings == {
+            "town.name": Path("town", "name"),
+            "atmosphere.weather": Path("atmosphere", "weather"),
+        }
+
+    def test_infer_input_bindings_ignores_missing_paths(self):
+        t = Template("case", "Town: {town.name}; Missing: {town.backstory}")
+        ctx = Context(MappingNode({"town": MappingNode({"name": ScalarNode("Eerie")})}))
+
+        bindings = t.infer_input_bindings(ctx)
+        assert bindings == {"town.name": Path("town", "name")}
+
+    def test_infer_input_bindings_matches_unresolved_resolvable_schema_field(self):
+        out_schema = Schema(
+            name="SceneOut",
+            fields=[FieldSpec(name="description", type="str", required=True)],
+        )
+        scene_node = ResolvableNode(
+            template="scene",
+            output_schema=out_schema,
+            input_bindings={},
+            dependencies=[],
+        )
+        ctx = Context(MappingNode({"scene": scene_node}))
+        t = Template("narrate", "Describe: {scene.description}")
+
+        bindings = t.infer_input_bindings(ctx)
+        assert bindings == {"scene.description": Path("scene", "description")}
+
+    def test_infer_input_bindings_matches_nested_unresolved_schema_path(self):
+        details_schema = Schema(
+            name="SceneDetails",
+            fields=[FieldSpec(name="smell", type="str", required=True)],
+        )
+        out_schema = Schema(
+            name="SceneOut",
+            fields=[FieldSpec(name="details", type=details_schema, required=True)],
+        )
+        scene_node = ResolvableNode(
+            template="scene",
+            output_schema=out_schema,
+            input_bindings={},
+            dependencies=[],
+        )
+        ctx = Context(MappingNode({"scene": scene_node}))
+        t = Template("narrate", "Smell: {scene.details.smell}")
+
+        bindings = t.infer_input_bindings(ctx)
+        assert bindings == {"scene.details.smell": Path("scene", "details", "smell")}
 
 
 class TestTemplateRegistry:

@@ -26,6 +26,7 @@ from context_resolver.inference.strategy import ResolutionStrategy, PromptStrate
 from context_resolver.inference.mock_provider import MockProvider
 from context_resolver.query.passes import ResolutionPass
 from context_resolver.query.resolver import Resolver
+from context_resolver.context.context import Context
 from context_resolver.templates.template import Template, TemplateRegistry
 
 
@@ -64,6 +65,32 @@ class TestResolvableNodeInitialState:
 
     def test_error_is_none(self, resolvable_node):
         assert resolvable_node.error is None
+        
+    def test_template_first_constructor_sets_template_ref(self, simple_schema):
+        template = Template("t", "Hello {data.x}")
+        node = ResolvableNode(template, simple_schema)
+        assert node.template_ref == "t"
+
+    def test_without_bindings_and_dependencies_is_not_configured(self, simple_schema):
+        template = Template("t", "Hello {data.x}")
+        node = ResolvableNode(template, simple_schema)
+        assert not node.is_configured()
+
+    def test_with_explicit_bindings_is_configured(self, simple_schema):
+        node = ResolvableNode(
+            template="t",
+            output_schema=simple_schema,
+            input_bindings={"x": Path("data", "x")},
+        )
+        assert node.is_configured()
+
+    def test_configure_infers_bindings_and_dependencies(self, simple_schema):
+        template = Template("t", "Hello {data.x}")
+        node = ResolvableNode(template, simple_schema)
+        ctx = Context(MappingNode({"data": MappingNode({"x": ScalarNode("v")}), "target": node}))
+        assert node.is_configured()
+        assert node.input_bindings == {"data.x": Path("data", "x")}
+        assert node.dependencies == [Path("data", "x")]
 
     def test_repr_uses_class_name(self, resolvable_node):
         assert "ResolvableNode" in repr(resolvable_node)
