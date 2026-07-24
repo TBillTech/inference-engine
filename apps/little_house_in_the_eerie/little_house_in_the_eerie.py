@@ -122,11 +122,53 @@ def _scalar(ctx: Context, *segments: str) -> Any:
 
 place_holder = ScalarNode(None)
 
+def simple_schema(name, field_name, template_str):
+    key = name.replace(' ', '')
+    t = JSONOutputTemplate(
+        name=key,
+        template_str = template_str,
+        description=f"A generated {name}."
+    ),
+    s = Schema(
+        name=key,
+        fields=[
+            FieldSpec(
+                name=field_name,
+                type="str",
+                required=True,
+                decription=f"A {name}."
+            )
+        ]
+    )
+    return (t, s)
+
+
 def build_initial_context() -> Context:
     """
     Construct the opening game state as a Context AST.
     """
-    brochure_schema = Schema(
+    # ------------------------------------------------------------------
+    # Template registry
+    # The template strings use Python str.format_map substitution.
+    # ------------------------------------------------------------------
+    registry = TemplateRegistry()
+    brochure = (JSONOutputTemplate(
+        name="TownBrochure",
+        template_str=(
+            "Your are the Co-GM for a paranormal investigation game centered on a little town. "
+            "Choose a location {interview.destination_hint}, and remember to keep it isolated and preferably hidden "
+            "from the rest of the world; that’s how its inhabitants like to live. For example, "
+            "the location could be vast desert near 7 shooter peak, OR concealed in a dense forest "
+            "near terror falls, OR in a canyon near the cliffs of twilight, OR on a remote island etc...  "
+            "Choose a name for it, like Sapphire Bluffs or Little Hill Marsh. "
+            "Invent the Economic basis for the town in just a few words, for example Diary Farming OR Mining OR ... "
+            "The Town has a dark backstory that the townsfolk seem to have forgotten or keep hiding. "
+            "For example, it was once a hub for smuggling operations, OR maybe they had witch trials, OR "
+            "organized crime controls local busineses, OR something else equally scandalous. "
+        ),
+        description="Generates a brochure for one of the towns the player can investigate."
+    ),
+    Schema(
         name="TownBrochure",
         fields=[
             FieldSpec(
@@ -155,9 +197,29 @@ def build_initial_context() -> Context:
             ),
         ],
         description="Output schema for a town in the brochure (possible nearby location for the house)"
-    )
+    ))
+    registry.register(brochure[0])
 
-    case_schema = Schema(
+    case_headline = (JSONOutputTemplate(
+        name="CaseHeadline",
+        template_str=(
+            "You are a Co-GM for a paranormal investigation game centered on a little town. "
+            "The town is named {town.name}, situated in: "
+            "{town.location} "
+            "For their livelihood, the denizens rely on: "
+            "{town.economy} "
+            "Those who know about the town are aware that: "
+            "{town.backstory} "
+            "Invent a Case to be investigated by a paranormal investigator, (surface level, not the root). "
+            "Life in the Town is calm and slow, like trees swaying in the wind. "
+            "However, the peaceful routine of its inhabitants was recently disturbed by an extraordinary "
+            "event, rooted in a case for the investigator to delve into. For example, maybe a person is missing, "
+            "OR someone is kidnapped, OR mysterious power outages, etc... What is the headline that "
+            "drew the investigator here? What is the sensational story in the newspaper?"
+        ),
+        description="Generate a case headline for the investigator."
+    ),
+    Schema(
         name="CaseHeadline",
         fields=[
             FieldSpec(
@@ -173,85 +235,117 @@ def build_initial_context() -> Context:
                 description="The sensational (and superficial) description of the case."
             )
         ],
-    )
+    ))
+    registry.register(case_headline[0])
 
-    secret_schema = Schema(
-        name="InvestigatorSecret",
+    personal_secret = simple_schema("Investigator Secret", "secret", (
+            "You are the Co-GM for a paranormal investigation game. "
+            "Generate a dark personal secret for investigator {investigator.first_name} {investigator.last_name}, "
+            "who is investigating the case titled '{case.name}'."
+        ))
+    registry.register(personal_secret[0])
+
+    atmosphere_vibe = simple_schema("Atmosphere Vibe", "vibe", (
+            "Describe the atmosphere of a paranormal investigation scene in one evocative sentence. "
+            "The time is {atmosphere.hour_of_day}:{atmosphere.minute_of_day} PM is {atmosphere.post_meridian}. "
+            "The weather is: {weather}."
+        ))
+    registry.register(atmosphere_vibe[0])
+
+    investigator_archetype = simple_schema("Investigator Archetype", "archetype", (
+            "In just a word or two, suggest an archetype for the {interview.archetype_hint} investigator. "
+            "Archetypes are things like: Federal Agent, Doctor, College Student, Amateur Sleuth, Disgraced Policeman. "            
+        ))
+    registry.register(investigator_archetype[0])
+
+    attributes_modifiers = (JSONOutputTemplate(
+        name="AttributesModifiers",
+        template_str = (
+            "The investigator (a {investigator.archetype}) has Agility, Mind, Strength and Prescence attributes."
+            "The investigator also has some secrets: {investigator.secrets}."
+            "Choose plus modifiers for these attributes between 0 and 3. Use numbers that seem to make sense when describing this person's advantages."
+        ),
+        description="Investigator attribute modifiers"
+    ),
+    Schema(
+        name="AttributeModifiers",
         fields=[
             FieldSpec(
-                name="secret",
+                name="agility",
+                type="int",
+                required=True,
+                description="Dexterity and Athletics"
+            ),
+            FieldSpec(
+                name="mind",
+                type="int",
+                required=True,
+                description="Critical thinking and wisdom"
+            ),
+            FieldSpec(
+                name="strength",
+                type="int",
+                required=True,
+                description="Health and Strength"
+            ),
+            FieldSpec(
+                name="prescence",
+                type="int",
+                required=True,
+                description="Charisma and Persuasion"
+            )
+        ]
+    ))
+
+    interest = simple_schema("Interest", "interest", (
+            "The investigator (a {investigator.archetype}) has an {interview.interest_hint} interest in this case. "
+            "The investigator also has some secrets: {investigator.secrets}. "
+            "The current case is {case.name}. {case.description} "
+            "Invent a reason why the investigator is so invested in this case."
+        ))
+    registry.register(interest[0])
+
+    vibe = (JSONOutputTemplate(
+        name="Vibe", 
+        template_str = (
+            "Describe the weather, vibe, and urgency each in one evocative sentence. "
+            "Don't just repeat the same sentence. "
+            "The current scene location is: {scene.location} . the current scene specifics are {scene.specfics} . "
+            "The time is {atmosphere.hour_of_day}:{atmosphere.minute_of_day} PM is {atmosphere.post_meridian}. "
+            "The previous weather is: {atmosphere.prior_weather}. "
+            "The weather is {atmosphere.weather_changing} from what it was."
+            "If the PM is past 6 PM, or past 6 AM, then make sure to correct the weather if necessary.  "
+            "For example, it should be something like 'twinkling stars' past 6 PM because it is night, and could no longer be sunny. "
+            "But weather could still be not changing and still clear."
+            "If the scene is indoors, be careful not to describe raindrops hitting things, for example. "
+            "The vibe should be the vague atmosphere of tension or peace or levity, and not repeat any current scene location or specifics. "
+            "The urgency should be the gut viscreal feeling of the investigator versus how soon the time will run out.  A short sentence."
+            "The current timestep is {atmosphere.time_limit} out of 12, when 'it is game over!' "
+        )),
+    Schema(
+        name="Vibe",
+        fields=[
+            FieldSpec(
+                name="weather",
                 type="str",
                 required=True,
-                description="A dark personal secret the investigator carries",
+                description="A simple description of just the weather conditions."
             ),
-        ],
-        description="Output schema for investigator_secret template",
-    )
-
-    vibe_schema = Schema(
-        name="AtmosphereVibe",
-        fields=[
             FieldSpec(
                 name="vibe",
                 type="str",
                 required=True,
-                description="One evocative sentence capturing the atmosphere",
+                description="The feeling in the atmosphere like tense, peaseful, or joyous."
             ),
-        ],
-        description="Output schema for atmosphere_vibe template",
-    )
-
-    brochure_node = ResolvableNode(
-        template_ref="town_brochure",
-        input_bindings={}
-        output_schema=brochure_schema,
-        dependencies=[]
-    )
-
-    secret_node = ResolvableNode(
-        template_ref="investigator_secrets",
-        input_bindings={
-            "investigator_name": Path("investigator", "name"),
-            "case_title": Path("case", "title"),
-        },
-        output_schema=secret_schema,
-        dependencies=[
-            Path("investigator", "name"),
-            Path("case", "title"),
-        ],
-    )
-
-    # ------------------------------------------------------------------
-    # PromptNode 2 – atmospheric vibe
-    # ------------------------------------------------------------------
-    vibe_node = ResolvableNode(
-        template_ref="atmosphere_vibe",
-        input_bindings={
-            "weather": Path("atmosphere", "weather"),
-            "time_of_day": Path("atmosphere", "time_of_day"),
-        },
-        output_schema=vibe_schema,
-        dependencies=[
-            Path("atmosphere", "weather"),
-            Path("atmosphere", "time_of_day"),
-        ],
-    )
-
-    # ------------------------------------------------------------------
-    # PromptNode 3 – scene sensory details
-    # ------------------------------------------------------------------
-    sensory_node = ResolvableNode(
-        template_ref="scene_sensory",
-        input_bindings={
-            "location": Path("scene", "location"),
-            "time_of_day": Path("atmosphere", "time_of_day"),
-        },
-        output_schema=sensory_schema,
-        dependencies=[
-            Path("scene", "location"),
-            Path("atmosphere", "time_of_day"),
-        ],
-    )
+            FieldSpec(
+                name="urgency",
+                type="str",
+                required=True,
+                description="The viscreal feeling of how close to 'game over!'"
+            )
+        ]
+        ))
+    registry.register(vibe[0]s)
 
     # ------------------------------------------------------------------
     # Full AST
@@ -259,35 +353,40 @@ def build_initial_context() -> Context:
     root = MappingNode({
         "interview": MappingNode({
             "destination_hint": ScalarNode(" somewhere remote "),
-            "brochure1": brochure_node,
-            "brochure1": brochure_node,
-            "brochure1": brochure_node,
-            "brochure1": brochure_node,
-            "case1": case_node,
-            "case2": case_node,
-            "case3": case_node,
-            "case4": case_node,
+            "brochure1": ResolutionNode(*brochure),
+            "brochure2": ResolutionNode(*brochure),
+            "brochure3": ResolutionNode(*brochure),
+            "brochure4": ResolutionNode(*brochure),
+            "case1": ResolutionNode(*case_headline),
+            "case2": ResolutionNode(*case_headline),
+            "case3": ResolutionNode(*case_headline),
+            "case4": ResolutionNode(*case_headline),
+            "archetype_hint": ScalarNode(" curious "),
+            "interest_hint": ScalarNode(" keen ")
         }),
+        # Town is filled in via player choosing a brochure output
         "town": MappingNode({
             "name": place_holder,
             "location": place_holder,
             "economic": place_holder,
             "backstory": place_holder,
         }),
+        # case is filled in via player choosing a case output
         "case": MappingNode({
             "name": place_holder,
             "description": place_holder
         })
+        # investigator is filled in during initial interview
         "investigator": MappingNode({
             "first_name": place_holder,
             "last_name": place_holder,
-            "archetype": archetype_node,
-            "attributes": attributes_node,
+            "archetype": ResolutionNode(*investigator_archetype),
+            "attributes": ResolutionNode(*attributes_modifiers),
             "wounds": ScalarNode(0),
             "instability": ScalarNode(0),
             "luck": ScalarNode(9),
             "secrets": place_holder,
-            "interest": interest_node,
+            "interest": ResolutionNode(*interest),
             "advantages": SequenceNode([]),
             "disadvantages": SequenceNode([])
         }),
@@ -332,10 +431,10 @@ def build_initial_context() -> Context:
             "hour_of_day": ScalarNode(8),
             "minute_of_day": ScalarNode(20),
             "post_meridian": ScalarNode(False),
-            "weather": weather_node,
-            "vibe": vibe_node,
+            "weather_changing": ScalarNode("Not changing")
+            "prior_weather": ScalarNode("Sunny")
+            "vibe": ResolutionNode(*vibe),
             "time_limit": ScalarNode(6),
-            "urgency": urgency_node,
         }),
         "scene": MappingNode({
             "location": ScalarNode("Little House"),
@@ -365,74 +464,6 @@ def build_initial_context() -> Context:
         }),
     })
 
-    # ------------------------------------------------------------------
-    # Template registry
-    # The template strings use Python str.format_map substitution.
-    # ------------------------------------------------------------------
-    registry = TemplateRegistry()
-    registry.register(JSONOutputTemplate(
-        name="town_brochure",
-        template_str=(
-            "Your are the Co-GM for a paranormal investigation game centered on a little town."
-            "Choose a location {interview.destination_hint}, and remember to keep it isolated and preferably hidden "
-            "from the rest of the world; that’s how its inhabitants like to live. For example, "
-            "the location could be vast desert near 7 shooter peak, OR concealed in a dense forest "
-            "near terror falls, OR in a canyon near the cliffs of twilight, OR on a remote island etc...  "
-            "Choose a name for it, like Sapphire Bluffs or Little Hill Marsh."
-            "Invent the Economic basis for the town in just a few words, for example Diary Farming OR Mining OR ..."
-            "The Town has a dark backstory that the townsfolk seem to have forgotten or keep hiding."
-            "For example, it was once a hub for smuggling operations, OR maybe they had witch trials, OR"
-            "organized crime controls local busineses, OR something else equally scandalous."
-        ),
-        description="Generates a brochure for one of the towns the player can investigate."
-    ))
-
-    registry.register(JSONOutputTemplate(
-        name="town_case",
-        template_str=(
-            "You are a Co-GM for a paranormal investigation game centered on a little town."
-            "The town is named {town.name}, situated in: "
-            "{town.location}"
-            "For their livelihood, the denizens rely on: "
-            "{town.economy}"
-            "Those who know about the town are aware that: "
-            "{town.backstory}"
-            "Invent a Case to be investigated by a paranormal investigator, (surface level, not the root). "
-            "Life in the Town is calm and slow, like trees swaying in the wind. "
-            "However, the peaceful routine of its inhabitants was recently disturbed by an extraordinary "
-            "event, rooted in a case for the investigator to delve into. For example, maybe a person is missing, "
-            "OR someone is kidnapped, OR mysterious power outages, etc... What is the headline that "
-            "drew the investigator here?"
-        )
-    ))
-
-    registry.register(Template(
-        name="investigator_secret",
-        template_str=(
-            "You are the Co-GM for a paranormal investigation game. "
-            "Generate a dark personal secret for investigator {investigator.first_name} {investigator.last_name}, "
-            "who is investigating the case titled '{case.name}'."
-        ),
-        description="Generates a secret backstory element for the investigator",
-    ))
-
-    registry.register(Template(
-        name="atmosphere_vibe",
-        template_str=(
-            "Describe the atmosphere of a horror investigation scene in one evocative "
-            "sentence. The time is {time_of_day}. The weather is: {weather}."
-        ),
-        description="Generates a one-line atmospheric description",
-    ))
-
-    registry.register(Template(
-        name="scene_sensory",
-        template_str=(
-            "Describe the sensory details of the following location in one vivid "
-            "sentence. Location: {location}. Time of day: {time_of_day}."
-        ),
-        description="Generates sensory details for the current scene location",
-    ))
 
     # ------------------------------------------------------------------
     # LLMResolver
