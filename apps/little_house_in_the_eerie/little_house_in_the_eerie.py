@@ -119,13 +119,10 @@ def _scalar(ctx: Context, *segments: str) -> Any:
     return node.value if isinstance(node, ScalarNode) else None  # type: ignore[union-attr]
 
 def _set_keyed_node(ctx: Context, node: Node, *segments: str) -> None:
-    """Set a named (or indexed) Node in the Context"""
-    parent_segments = segments[:-1]
-    parent_node = ctx.query(Path(*parent_segments))
-    if isinstance(parent_node, MappingNode):
-        parent_node.set(segments[-1], node)
-    if isinstance(parent_node, SequenceNode):
-        parent_node.set(int(segments[-1]), node)
+    """Set a node at *segments* using Context.set so caches are invalidated."""
+    if not segments:
+        raise ValueError("_set_keyed_node requires at least one path segment")
+    ctx.set(Path(*segments), node)
 
 def _invalidate(ctx: Context, *segments: str) -> None:
     """Force a ResolveableNode to be regenerated."""
@@ -179,15 +176,20 @@ def query_investigator_name(ctx: Context, mode: NameMode, *segments: str):
     if len(segments) == 0:
         segments = ['investigator', 'name']
     if mode == NameMode.FIRST:
-        return _scalar(ctx, *segments, 'first')
+        return _query_resolved_field_text(ctx, *segments, field_name='first')
     if mode == NameMode.FORMAL:
-        return f"{_scalar(ctx, *segments, 'honorific')} {_scalar(ctx, *segments, 'last')}"
+        honorific = (f"{_query_resolved_field_text(ctx, *segments, field_name='honorific')}").strip()
+        if not honorific:
+            honorific = _query_resolved_field_text(ctx, *segments, field_name='first').strip()[0]
+        return (honorific + f"{_query_resolved_field_text(ctx, *segments, field_name='last')}").strip()
     if mode == NameMode.LAST:
-        return _scalar(ctx, *segments, 'last')
+        return _query_resolved_field_text(ctx, *segments, field_name='last')
     full_name = (
-        f"{_scalar(ctx, *segments, 'honorific')} {_scalar(ctx, *segments, 'first')} "
-        f"{_scalar(ctx, *segments, 'middle')} {_scalar(ctx, *segments, 'last')} "
-        f"{_scalar(ctx, *segments, 'suffix')}" )
+        f"{_query_resolved_field_text(ctx, *segments, field_name='honorific')} "
+        f"{_query_resolved_field_text(ctx, *segments, field_name='first')} "
+        f"{_query_resolved_field_text(ctx, *segments, field_name='middle')} "
+        f"{_query_resolved_field_text(ctx, *segments, field_name='last')} "
+        f"{_query_resolved_field_text(ctx, *segments, field_name='suffix')}" ).strip()
     return full_name
 
 
@@ -203,6 +205,21 @@ def _query_resolved_field_text(ctx: Context, *segments: str, field_name: str) ->
         return _fmt(result)
     return _fmt(node)
 
+def meta_temp(temp: float, name: str, max_tokens: int = 24) -> Any:
+    max_tokens = max_tokens
+    return {
+        "temperature": temp,
+        "extra": {
+            "seed": -1,
+            "max_tokens": max_tokens,
+            "top_p": 0.98,
+            "top_k": 80,
+            "min_p": 0.05,
+            "repeat_penalty": 1.12,
+        },
+    }
+
+
 def build_initial_context() -> Context:
     """Construct the opening game state as a Context AST."""
     registry = TemplateRegistry()
@@ -211,9 +228,14 @@ def build_initial_context() -> Context:
         template_str=(
             "You are the Co-GM for a paranormal investigation game centered on a little town. "
             "The investigator is a {investigator.archetype}. "
+            "Fill in this honorific: {interview.honorific_hint}. "
             "The first name {interview.first_name_hint}. "
-            "The rest of the name {interview.rest_name_hint}. "
-            "What is the investigator's name? A prefix and/or a suffix could be provided. "
+            "The rest of the name {interview.last_name_hint}. "
+            "Fill in this suffix: {interview.suffix_hint}. "
+            "What is the investigator's name? "
+            "If the optional honorific is None or Nothing, then leave it blank."
+            "If the optional suffix is None or Nothing, then leave it blank. "
+            "Either fill in the optional with someting like the above, or leave them blank. "
             "A middle name may also be provided. "
         ),
         schema=Schema(
@@ -411,12 +433,14 @@ def build_initial_context() -> Context:
         {
             "interview": MappingNode(
                 {
-                    "first_name_hint": ScalarNode(" starts with the letter T "),
-                    "last_name_hint": ScalarNode(" ends with the letter R "),
-                    "name_guess1": ResolvableNode(*investigator_name),
-                    "name_guess2": ResolvableNode(*investigator_name),
-                    "name_guess3": ResolvableNode(*investigator_name),
-                    "name_guess4": ResolvableNode(*investigator_name),
+                    "honorific_hint": ScalarNode(" nothing "),
+                    "first_name_hint": ScalarNode(" starts with the letter J, but not just the letter "),
+                    "last_name_hint": ScalarNode(" a short middle name, last name ends with the letter R, but not just the letter "),
+                    "suffix_hint": ScalarNode(" nothing "),
+                    "name_guess1": ResolvableNode(*investigator_name, metadata=meta_temp(1.0, "investigator_name", max_tokens=80)),
+                    "name_guess2": ResolvableNode(*investigator_name, metadata=meta_temp(5.0, "investigator_name", max_tokens=80)),
+                    "name_guess3": ResolvableNode(*investigator_name, metadata=meta_temp(7.0, "investigator_name", max_tokens=80)),
+                    "name_guess4": ResolvableNode(*investigator_name, metadata=meta_temp(11.0, "investigator_name", max_tokens=80)),
                     "destination_hint": ScalarNode(" somewhere remote "),
                     "brochure1": ResolvableNode(*brochure),
                     "brochure2": ResolvableNode(*brochure),
@@ -432,59 +456,19 @@ def build_initial_context() -> Context:
                     "archetype_hint": ScalarNode(" investigator of the unknown and unknowable, but not an Occultist "),
                     "archetype1": ResolvableNode(
                         *investigator_archetype,
-                        metadata={
-                            "temperature": 1.0,
-                            "extra": {
-                                "seed": -1,
-                                "max_tokens": 24,
-                                "top_p": 0.98,
-                                "top_k": 80,
-                                "min_p": 0.05,
-                                "repeat_penalty": 1.12,
-                            },
-                        },
+                        metadata=meta_temp(1.0, "investigator_arch"),
                     ),
                     "archetype2": ResolvableNode(
                         *investigator_archetype,
-                        metadata={
-                            "temperature": 3.0,
-                            "extra": {
-                                "seed": -1,
-                                "max_tokens": 24,
-                                "top_p": 0.98,
-                                "top_k": 80,
-                                "min_p": 0.05,
-                                "repeat_penalty": 1.12,
-                            },
-                        },
+                        metadata=meta_temp(3.0, "investigator_arch"),
                     ),
                     "archetype3": ResolvableNode(
                         *investigator_archetype,
-                        metadata={
-                            "temperature": 5.0,
-                            "extra": {
-                                "seed": -1,
-                                "max_tokens": 24,
-                                "top_p": 0.98,
-                                "top_k": 80,
-                                "min_p": 0.05,
-                                "repeat_penalty": 1.12,
-                            },
-                        },
+                        metadata=meta_temp(5.0, "investigator_arch"),
                     ),
                     "archetype4": ResolvableNode(
                         *investigator_archetype,
-                        metadata={
-                            "temperature": 7.0,
-                            "extra": {
-                                "seed": -1,
-                                "max_tokens": 24,
-                                "top_p": 0.98,
-                                "top_k": 80,
-                                "min_p": 0.05,
-                                "repeat_penalty": 1.12,
-                            },
-                        },
+                        metadata=meta_temp(7.0, "investigator_arch"),
                     ),
                     "interest_hint": ScalarNode(" keen "),
                     "interest1": ResolvableNode(*interest),
@@ -1009,27 +993,36 @@ def handle_game_begin(ctx: Context, ms: MachineState, cmd: Command) -> Transitio
     return Transition(next_phase=ms.phase, prompt=prompt, options=options)
 
 def handle_interview_choose_name(ctx: Context, ms: MachineState, cmd: Command) -> Transition:
+    if cmd.verb == Verb.CMD_CHOICE and cmd.ordinal >= 1 and cmd.ordinal <= 4:
+        if cmd.arg.strip() == "":
+            return handle_interview_choose_name(ctx, ms, cmd_noop)
     prompt = (
         "You're name? What was it exactly? You are pretty sure that: "
     )
     if cmd.verb == Verb.CMD_CHOICE:
-        if cmd.ordinal == 1 and cmd.arg.strip() != "":
+        if cmd.ordinal == 1:
             _set_keyed_node(ctx, ScalarNode(cmd.arg), 'interview', 'first_name_hint')
-        if cmd.ordinal == 2 and cmd.arg.strip() != "":
+        if cmd.ordinal == 2:
             _set_keyed_node(ctx, ScalarNode(cmd.arg), 'interview', 'last_name_hint')
         if cmd.ordinal == 3:
-            node = ctx.query(Path('interview', 'name_guess1'))
+            _set_keyed_node(ctx, ScalarNode(cmd.arg), 'interview', 'honorific_hint')
         if cmd.ordinal == 4:
-            node = ctx.query(Path('interview', 'name_guess2'))
+            _set_keyed_node(ctx, ScalarNode(cmd.arg), 'interview', 'suffix_hint')
         if cmd.ordinal == 5:
-            node = ctx.query(Path('interview', 'name_guess3'))
+            node = ctx.query(Path('interview', 'name_guess1'))
         if cmd.ordinal == 6:
+            node = ctx.query(Path('interview', 'name_guess2'))
+        if cmd.ordinal == 7:
+            node = ctx.query(Path('interview', 'name_guess3'))
+        if cmd.ordinal == 8:
             node = ctx.query(Path('interview', 'name_guess4'))
-        if cmd.ordinal >= 3 or cmd.ordinal <= 6:
+        if 5 <= cmd.ordinal <= 8:
             _set_keyed_node(ctx, node, 'investigator', 'name')
             return handle_interview_choose_town(ctx, MachineState(Phase.INTERVIEW_CHOOSE_ARCHETYPE), cmd_noop)
         options = [Command(verb=Verb.CMD_CHOICE, ordinal=1, arg=f"My first name: {_scalar(ctx, 'interview', 'first_name_hint')}")
-                ,Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"The rest of my name: {_scalar(ctx), 'interview', 'last_name_hint'}")
+                ,Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"The rest of my name: {_scalar(ctx, 'interview', 'last_name_hint')}")
+                ,Command(verb=Verb.CMD_CHOICE, ordinal=3, arg=f"My honorific is: {_scalar(ctx, 'interview', 'honorific_hint')}")
+                ,Command(verb=Verb.CMD_CHOICE, ordinal=4, arg=f"My suffix is: {_scalar(ctx, 'interview', 'suffix_hint')}")
                 ,Command(verb=Verb.CMD_NOPE, arg="At least you know that much; try thinking again ...")]
         return Transition(next_phase=ms.phase, prompt=prompt, options=options)
     if cmd.verb == Verb.CMD_NOPE or cmd.verb == Verb.CMD_CHOICE:
@@ -1038,15 +1031,20 @@ def handle_interview_choose_name(ctx: Context, ms: MachineState, cmd: Command) -
         _invalidate(ctx, 'interview', 'name_guess3')
         _invalidate(ctx, 'interview', 'name_guess4')
     options = [Command(verb=Verb.CMD_CHOICE, ordinal=1, arg=f"My first name: {_scalar(ctx, 'interview', 'first_name_hint')}")
-              ,Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"The rest of my name: {_scalar(ctx), 'interview', 'last_name_hint'}")
-              ,Command(verb=Verb.CMD_CHOICE, ordinal=3, arg=query_investigator_name(ctx, NameMode.FULL, 'interview', 'name_guess1'))
-              ,Command(verb=Verb.CMD_CHOICE, ordinal=4, arg=query_investigator_name(ctx, NameMode.FULL, 'interview', 'name_guess2'))
-              ,Command(verb=Verb.CMD_CHOICE, ordinal=5, arg=query_investigator_name(ctx, NameMode.FULL, 'interview', 'name_guess3'))
-              ,Command(verb=Verb.CMD_CHOICE, ordinal=6, arg=query_investigator_name(ctx, NameMode.FULL, 'interview', 'name_guess4'))
+              ,Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"The rest of my name: {_scalar(ctx, 'interview', 'last_name_hint')}")
+              ,Command(verb=Verb.CMD_CHOICE, ordinal=3, arg=f"My honorific is: {_scalar(ctx, 'interview', 'honorific_hint')}")
+              ,Command(verb=Verb.CMD_CHOICE, ordinal=4, arg=f"My suffix is: {_scalar(ctx, 'interview', 'suffix_hint')}")
+              ,Command(verb=Verb.CMD_CHOICE, ordinal=5, arg=query_investigator_name(ctx, NameMode.FULL, 'interview', 'name_guess1'))
+              ,Command(verb=Verb.CMD_CHOICE, ordinal=6, arg=query_investigator_name(ctx, NameMode.FULL, 'interview', 'name_guess2'))
+              ,Command(verb=Verb.CMD_CHOICE, ordinal=7, arg=query_investigator_name(ctx, NameMode.FULL, 'interview', 'name_guess3'))
+              ,Command(verb=Verb.CMD_CHOICE, ordinal=8, arg=query_investigator_name(ctx, NameMode.FULL, 'interview', 'name_guess4'))
               ,Command(verb=Verb.CMD_NOPE, arg="Those sound like people with similiar interests; try thinking again ...")]
     return Transition(next_phase=ms.phase, prompt=prompt, options=options)
 
 def handle_interview_choose_archetype(ctx: Context, ms: MachineState, cmd: Command) -> Transition:
+    if cmd.verb == Verb.CMD_CHOICE and cmd.ordinal ==1:
+        if cmd.arg.strip() == "":
+            return handle_interview_choose_archetype(ctx, ms, cmd_noop)
     prompt = (
         "You know you are an investigator of some kind, but what kind exactly? Was it: "
     )
