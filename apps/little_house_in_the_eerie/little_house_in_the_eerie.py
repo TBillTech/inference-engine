@@ -41,9 +41,11 @@ quit / exit           End the session.
 from __future__ import annotations
 
 import random
-import sys
 from typing import Any
 
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from typing import Callable
 from context_resolver.ast.nodes import MappingNode, ScalarNode, SequenceNode
 from context_resolver.ast.paths import Path
 from context_resolver.ast.resolvable_node import ResolvableNode, ResolvableNodeState
@@ -109,12 +111,25 @@ def _query_text(ctx: Context, *segments: str) -> str:
         return str(node.value) if node.value is not None else "<unspecified>"
     return _fmt(node)
 
-
 def _scalar(ctx: Context, *segments: str) -> Any:
     """Query a ScalarNode and return its raw Python value."""
     node = ctx.query(Path(*segments))
     return node.value if isinstance(node, ScalarNode) else None  # type: ignore[union-attr]
 
+def _set_keyed_node(ctx: Context, node: Node, *segments: str) -> None:
+    """Set a named (or indexed) Node in the Context"""
+    parent_segments = segments[:-1]
+    parent_node = ctx.query(Path(*parent_segments))
+    if isinstance(parent_node, MappingNode):
+        parent_node.set(segments[-1], node)
+    if isinstance(parent_node, SequenceNode):
+        parent_node.set(int(segments[-1]), node)
+
+def _invalidate(ctx: Context, *segments: str) -> None:
+    """Force a ResolveableNode to be regenerated."""
+    node = ctx.query(Path(*segments))
+    if isinstance(node, ResolveableNode):
+        node.mark_stale()
 
 # ---------------------------------------------------------------------------
 # Context construction
@@ -124,11 +139,6 @@ place_holder = ScalarNode(None)
 
 def simple_schema(name, field_name, template_str):
     key = name.replace(' ', '')
-    t = JSONOutputTemplate(
-        name=key,
-        template_str = template_str,
-        description=f"A generated {name}."
-    ),
     s = Schema(
         name=key,
         fields=[
@@ -136,333 +146,429 @@ def simple_schema(name, field_name, template_str):
                 name=field_name,
                 type="str",
                 required=True,
-                decription=f"A {name}."
+                description=f"A {name}."
             )
         ]
     )
+    t = JSONOutputTemplate(
+        name=key,
+        template_str=template_str,
+        schema=s,
+        description=f"A generated {name}."
+    )
     return (t, s)
 
+def template_schema_tuple(template_str, schema, description):
+    t = JSONOutputTemplate(
+        name=schema.name,
+        template_str=template_str,
+        schema=schema,
+        description=description
+    )
+    return (t, schema)
+
+class NameMode(Enum):
+    FIRST = auto()
+    FORMAL = auto()
+    LAST = auto()
+    FULL = auto()
+
+def query_investigator_name(ctx: Context, mode: NameMode, *segments: str):
+    if length(segments) == 0:
+        segments = ['investigator', 'name']
+    if NameMode == FIRST:
+        return _scalar(ctx, segments + ['first'])
+    if NameNode == FORMAL:
+        return f"{_scalar(ctx, segments + ['honorific'])} {_scalar(ctx, segments + ['last'])}"
+    if NameNode == Last:
+        return _scalar(ctx, segments + ['last'])
+    return f"{_scalar(ctx, segments + ['honorific'])} {_scalar(ctx, segments + ['first'])} "
+        f"{_scalar(ctx, segments + ['middle'])} {_scalar(ctx, segments + ['last'])} {_scalar(ctx, segments + ['suffix'])}"
 
 def build_initial_context() -> Context:
-    """
-    Construct the opening game state as a Context AST.
-    """
-    # ------------------------------------------------------------------
-    # Template registry
-    # The template strings use Python str.format_map substitution.
-    # ------------------------------------------------------------------
+    """Construct the opening game state as a Context AST."""
     registry = TemplateRegistry()
-    brochure = (JSONOutputTemplate(
-        name="TownBrochure",
+
+    investigator_name = template_schema_tuple(
         template_str=(
-            "Your are the Co-GM for a paranormal investigation game centered on a little town. "
-            "Choose a location {interview.destination_hint}, and remember to keep it isolated and preferably hidden "
-            "from the rest of the world; that’s how its inhabitants like to live. For example, "
-            "the location could be vast desert near 7 shooter peak, OR concealed in a dense forest "
-            "near terror falls, OR in a canyon near the cliffs of twilight, OR on a remote island etc...  "
-            "Choose a name for it, like Sapphire Bluffs or Little Hill Marsh. "
-            "Invent the Economic basis for the town in just a few words, for example Diary Farming OR Mining OR ... "
-            "The Town has a dark backstory that the townsfolk seem to have forgotten or keep hiding. "
-            "For example, it was once a hub for smuggling operations, OR maybe they had witch trials, OR "
-            "organized crime controls local busineses, OR something else equally scandalous. "
+            "You are the Co-GM for a paranormal investigation game centered on a little town. "
+            "The investigator is a {investigator.archetype}. "
+            "The first name {interview.first_name_hint}. "
+            "The rest of the name {interview.rest_name_hint}. "
+            "What is the investigator's name? A prefix and/or a suffix could be provided. "
+            "A middle name may also be provided. "
         ),
-        description="Generates a brochure for one of the towns the player can investigate."
-    ),
-    Schema(
-        name="TownBrochure",
-        fields=[
-            FieldSpec(
-                name="name",
-                type="str",
-                required=True,
-                decription="The Town name is composed of at least two parts, with an optional third part",
+        schema=Schema(
+            name="InvestigatorName",
+            fields=[
+                FieldSpec(name="honorific", type="str", required=False, description="Honorific"),
+                FieldSpec(name="first", type="str", required=True, description="First name"),
+                FieldSpec(name="middle", type="str", required=False, description="Middle name"),
+                FieldSpec(name="last", type="str", required=True, description="Last name"),
+                FieldSpec(name="suffix", type="str", required=False, description="Suffix")
+            ]
+        )
+    )
+
+    brochure = template_schema_tuple(
+            template_str=(
+                "You are the Co-GM for a paranormal investigation game centered on a little town. "
+                "Choose a location {interview.destination_hint}, and keep it isolated and hidden. "
+                "Invent a town name, an economic basis, and a dark backstory."
             ),
-            FieldSpec(
-                name="location",
-                type="str",
-                required=True,
-                description="Where is the town located atmospherically (exact geography is left vague)"
+            schema=Schema(
+                name="TownBrochure",
+                fields=[
+                    FieldSpec(name="name", type="str", required=True, description="Town name."),
+                    FieldSpec(name="location", type="str", required=True, description="Town location."),
+                    FieldSpec(name="economic", type="str", required=True, description="Economic basis."),
+                    FieldSpec(name="backstory", type="str", required=True, description="Dark backstory."),
+                ],
+                description="Output schema for a nearby town.",
             ),
-            FieldSpec(
-                name="economic",
-                type="str",
-                require=True,
-                description="The Economic foundation of the town"
-            ),
-            FieldSpec(
-                name="backstory",
-                type="str",
-                require=True,
-                description="The dark backstory of the town (possibly paranormal)"
-            ),
-        ],
-        description="Output schema for a town in the brochure (possible nearby location for the house)"
-    ))
+            description="Generates one town brochure option.",
+        )
     registry.register(brochure[0])
 
-    case_headline = (JSONOutputTemplate(
-        name="CaseHeadline",
-        template_str=(
-            "You are a Co-GM for a paranormal investigation game centered on a little town. "
-            "The town is named {town.name}, situated in: "
-            "{town.location} "
-            "For their livelihood, the denizens rely on: "
-            "{town.economy} "
-            "Those who know about the town are aware that: "
-            "{town.backstory} "
-            "Invent a Case to be investigated by a paranormal investigator, (surface level, not the root). "
-            "Life in the Town is calm and slow, like trees swaying in the wind. "
-            "However, the peaceful routine of its inhabitants was recently disturbed by an extraordinary "
-            "event, rooted in a case for the investigator to delve into. For example, maybe a person is missing, "
-            "OR someone is kidnapped, OR mysterious power outages, etc... What is the headline that "
-            "drew the investigator here? What is the sensational story in the newspaper?"
+    newspaper_title = template_schema_tuple(
+        templatestr=(
+            "You are a Co-GM for a paranormal investigation game. You need to come up with an in-fiction newspaper details. "
+            "The newspaper needs a Brand Name/Title, but not _too_ respectable.  It should lean speculative and too credulous. "
+            "Also, invent the publisher, circulation and date. The date should be {investigation.date_hint}. "
         ),
-        description="Generate a case headline for the investigator."
-    ),
-    Schema(
-        name="CaseHeadline",
-        fields=[
-            FieldSpec(
-                name="name",
-                type="str",
-                require=True,
-                desription="The headline for the case under investigation relating to this town"
+        schema=Schema(
+            name="Newspaper_Title",
+            fields=[
+                FieldSpec(name="title", type="str", required=True, description="Newspaper Title"),
+                FieldSpec(name="publisher", type="str", required=True, description="Publisher"),
+                FieldSpec(name="circulation", type="str", required=True, description="The city or means of circulation"),
+                FieldSpec(name="date", type="The date of this issue")
+            ],
+            description="Details for the investigators favored newspaper of record."
+        )
+    )
+    registry.register(newspaper_title[0])
+
+    case_headline = template_schema_tuple(
+            template_str=(
+                "You are a Co-GM for a paranormal investigation game. "
+                "The investigator archetype is {investigator.archetype}. "
+                "Town: {town.name}, location: {town.location}, economy: {town.economic}, backstory: {town.backstory}. "
+                "Invent a current case headline and a short sensational description for {interview.case_hint}."
             ),
-            FieldSpec(
-                name="description",
-                type="str",
-                require=True,
-                description="The sensational (and superficial) description of the case."
-            )
-        ],
-    ))
+            schema=Schema(
+                name="CaseHeadline",
+                fields=[
+                    FieldSpec(name="name", type="str", required=True, description="Case headline."),
+                    FieldSpec(name="description", type="str", required=True, description="Case summary."),
+                ],
+            ),
+            description="Generate a case headline for the investigator.",
+        )
     registry.register(case_headline[0])
 
-    personal_secret = simple_schema("Investigator Secret", "secret", (
-            "You are the Co-GM for a paranormal investigation game. "
-            "Generate a dark personal secret for investigator {investigator.first_name} {investigator.last_name}, "
-            "who is investigating the case titled '{case.name}'."
-        ))
+    personal_secret = simple_schema(
+        "Investigator Secret",
+        "secret",
+        (
+            "Generate a dark personal secret for investigator "
+            "{investigator.first_name} {investigator.last_name}, "
+            "who is investigating '{case.name}'."
+        ),
+    )
     registry.register(personal_secret[0])
 
-    atmosphere_vibe = simple_schema("Atmosphere Vibe", "vibe", (
-            "Describe the atmosphere of a paranormal investigation scene in one evocative sentence. "
-            "The time is {atmosphere.hour_of_day}:{atmosphere.minute_of_day} PM is {atmosphere.post_meridian}. "
-            "The weather is: {weather}."
-        ))
-    registry.register(atmosphere_vibe[0])
-
-    investigator_archetype = simple_schema("Investigator Archetype", "archetype", (
-            "In just a word or two, suggest an archetype for the {interview.archetype_hint} investigator. "
-            "Archetypes are things like: Federal Agent, Doctor, College Student, Amateur Sleuth, Disgraced Policeman. "            
-        ))
+    investigator_archetype = simple_schema(
+        "Investigator Archetype",
+        "archetype",
+        (
+            "In a word or two, suggest an archetype for this investigator: "
+            "{interview.archetype_hint}."
+        ),
+    )
     registry.register(investigator_archetype[0])
 
-    attributes_modifiers = (JSONOutputTemplate(
-        name="AttributesModifiers",
-        template_str = (
-            "The investigator (a {investigator.archetype}) has Agility, Mind, Strength and Prescence attributes."
-            "The investigator also has some secrets: {investigator.secrets}."
-            "Choose plus modifiers for these attributes between 0 and 3. Use numbers that seem to make sense when describing this person's advantages."
-        ),
-        description="Investigator attribute modifiers"
-    ),
-    Schema(
-        name="AttributeModifiers",
-        fields=[
-            FieldSpec(
-                name="agility",
-                type="int",
-                required=True,
-                description="Dexterity and Athletics"
+    attributes_modifiers = template_schema_tuple(
+            template_str=(
+                "The investigator (a {investigator.archetype}) has Agility, Mind, Strength and Prescence attributes. "
+                "The investigator also has some secrets: {investigator.secrets}. "
+                "Choose modifiers between 0 and 3 for each attribute."
             ),
-            FieldSpec(
-                name="mind",
-                type="int",
-                required=True,
-                description="Critical thinking and wisdom"
+            schema=Schema(
+                name="AttributeModifiers",
+                fields=[
+                    FieldSpec(name="agility", type="int", required=True, description="Dexterity and athletics."),
+                    FieldSpec(name="mind", type="int", required=True, description="Critical thinking and wisdom."),
+                    FieldSpec(name="strength", type="int", required=True, description="Health and strength."),
+                    FieldSpec(name="prescence", type="int", required=True, description="Charisma and persuasion."),
+                ],
             ),
-            FieldSpec(
-                name="strength",
-                type="int",
-                required=True,
-                description="Health and Strength"
-            ),
-            FieldSpec(
-                name="prescence",
-                type="int",
-                required=True,
-                description="Charisma and Persuasion"
-            )
-        ]
-    ))
+            description="Investigator attribute modifiers",
+        )
+    registry.register(attributes_modifiers[0])
 
-    interest = simple_schema("Interest", "interest", (
+    interest = simple_schema(
+        "Interest",
+        "interest",
+        (
             "The investigator (a {investigator.archetype}) has an {interview.interest_hint} interest in this case. "
-            "The investigator also has some secrets: {investigator.secrets}. "
-            "The current case is {case.name}. {case.description} "
-            "Invent a reason why the investigator is so invested in this case."
-        ))
+            "The current case is {case.name}. {case.description}. "
+            "Invent a reason they are personally invested."
+        ),
+    )
     registry.register(interest[0])
 
-    vibe = (JSONOutputTemplate(
-        name="Vibe", 
-        template_str = (
-            "Describe the weather, vibe, and urgency each in one evocative sentence. "
-            "Don't just repeat the same sentence. "
-            "The current scene location is: {scene.location} . the current scene specifics are {scene.specfics} . "
-            "The time is {atmosphere.hour_of_day}:{atmosphere.minute_of_day} PM is {atmosphere.post_meridian}. "
-            "The previous weather is: {atmosphere.prior_weather}. "
-            "The weather is {atmosphere.weather_changing} from what it was."
-            "If the PM is past 6 PM, or past 6 AM, then make sure to correct the weather if necessary.  "
-            "For example, it should be something like 'twinkling stars' past 6 PM because it is night, and could no longer be sunny. "
-            "But weather could still be not changing and still clear."
-            "If the scene is indoors, be careful not to describe raindrops hitting things, for example. "
-            "The vibe should be the vague atmosphere of tension or peace or levity, and not repeat any current scene location or specifics. "
-            "The urgency should be the gut viscreal feeling of the investigator versus how soon the time will run out.  A short sentence."
-            "The current timestep is {atmosphere.time_limit} out of 12, when 'it is game over!' "
-        )),
-    Schema(
-        name="Vibe",
-        fields=[
-            FieldSpec(
-                name="weather",
-                type="str",
-                required=True,
-                description="A simple description of just the weather conditions."
+    advantage = template_schema_tuple(
+            template_str=(
+                "Describe an advantage that the investigator has, usually based on equipment they packed with them "
+                "when they left home to began this investigation. " 
+                "If the investigator has a skill advantage, symbolize this by suggesting a reference textbook."
+                "But don't ignore the possibility of weapons or crime scene investigation tools either."
+                "The investigator is a {investigator.archetype} on the case {case.name}. {case.description}. "
+                "The investigator remembers they possess {interview.advantage_hint}. "
             ),
-            FieldSpec(
-                name="vibe",
-                type="str",
-                required=True,
-                description="The feeling in the atmosphere like tense, peaseful, or joyous."
+            schema=Schema(
+                name="Advantage",
+                fields=[
+                    FieldSpec(name="advantage", type="str", required=True, description="A very brief description of the advantage."),
+                    FieldSpec(name="description", type="str", required=True, description="A description of the advantage."),
+                    FieldSpec(name="item", type="str", required=True, desription="An objectified literal or symbolic representation of the advantage.")
+                ],
             ),
-            FieldSpec(
-                name="urgency",
-                type="str",
-                required=True,
-                description="The viscreal feeling of how close to 'game over!'"
-            )
-        ]
-        ))
-    registry.register(vibe[0]s)
+            description="One of the investigator's advantages, possibly literal or psychological."
+        )
+    registry.register(advantage[0])
 
-    # ------------------------------------------------------------------
-    # Full AST
-    # ------------------------------------------------------------------
-    root = MappingNode({
-        "interview": MappingNode({
-            "destination_hint": ScalarNode(" somewhere remote "),
-            "brochure1": ResolutionNode(*brochure),
-            "brochure2": ResolutionNode(*brochure),
-            "brochure3": ResolutionNode(*brochure),
-            "brochure4": ResolutionNode(*brochure),
-            "case1": ResolutionNode(*case_headline),
-            "case2": ResolutionNode(*case_headline),
-            "case3": ResolutionNode(*case_headline),
-            "case4": ResolutionNode(*case_headline),
-            "archetype_hint": ScalarNode(" curious "),
-            "interest_hint": ScalarNode(" keen ")
-        }),
-        # Town is filled in via player choosing a brochure output
-        "town": MappingNode({
-            "name": place_holder,
-            "location": place_holder,
-            "economic": place_holder,
-            "backstory": place_holder,
-        }),
-        # case is filled in via player choosing a case output
-        "case": MappingNode({
-            "name": place_holder,
-            "description": place_holder
-        })
-        # investigator is filled in during initial interview
-        "investigator": MappingNode({
-            "first_name": place_holder,
-            "last_name": place_holder,
-            "archetype": ResolutionNode(*investigator_archetype),
-            "attributes": ResolutionNode(*attributes_modifiers),
-            "wounds": ScalarNode(0),
-            "instability": ScalarNode(0),
-            "luck": ScalarNode(9),
-            "secrets": place_holder,
-            "interest": ResolutionNode(*interest),
-            "advantages": SequenceNode([]),
-            "disadvantages": SequenceNode([])
-        }),
-        "notebook": MappingNode({
-            "logbook": SequenceNode([]),
-            "daybook": SequenceNode([]),
-            "diary": SequenceNode([]),
-            "clues": SequenceNode([])
-        }),
-        "public": MappingNode({
-            "rumors": SequenceNode([]),
-            "conspiracies": SequenceNode([]),
-            "player": SequenceNode([])
-        })
-        "locations": MappingNode({
-            "Little House": MappingNode({
-                "name": ScalarNode("Little House"),
-                "description": little_house_description_node
-            })
-        }),
-        "npcs": MappingNode({
-            "Mable Jenner": MappingNode({
-                "first_name": ScalarNode("Mable"),
-                "last_name": ScalarNode("Jenner"),
-                "archetype": ScalarNode("Elderly Citizen"),
-                "attitude": ScalarNode(5),
-                "personality": ScalarNode("Clumsy"),
-                "motivation": ScalarNode("Duty"),
-                "location": ScalarNode("Little House")
-            }),
-            "Daryl Jenner": MappingNode({
-                "first_name": ScalarNode("Daryl"),
-                "last_name": ScalarNode("Jenner"),
-                "archetype": ScalarNode("Elderly Citizen"),
-                "attitude": ScalarNode(4),
-                "personality": ScalarNode("Introverted"),
-                "motivation": ScalarNode("Survival"),
-                "location": ScalarNode("Little House")
-            })
-        }),
-        "atmosphere": MappingNode({
-            "hour_of_day": ScalarNode(8),
-            "minute_of_day": ScalarNode(20),
-            "post_meridian": ScalarNode(False),
-            "weather_changing": ScalarNode("Not changing")
-            "prior_weather": ScalarNode("Sunny")
-            "vibe": ResolutionNode(*vibe),
-            "time_limit": ScalarNode(6),
-        }),
-        "scene": MappingNode({
-            "location": ScalarNode("Little House"),
-            "specifics": ScalarNode("You are sitting in a soft bed in a bedroom in the Little House,"
-                " chatting with Mable Jenners.")
-            "elements": SequenceNode(["Mable on rocking chair", "newspaper within reach", 
-                "comfortable bed", "my suitcase", "eclectic electric lamp", 
-                "alarm clock reading 8:20 A.M.", "Mable holding a bible with a bookmark",
-                "something about the light and the view of outside from the window feels eerie"]),
-            "npcs": SequenceNode(["Mable Jenner"]),
-            "description": scene_node
-        }),
-        "event": MappingNode({
-            "description": ScalarNode("Investigation Progress"),
-            "progress": ScalarNode("You see a suspect at the Location"),
-            "consequences": ScalarNode(None),      # underspecified
-            "escalation": ScalarNode(1),
-        }),
-        "action": MappingNode({
-            "available": SequenceNode([
-                ScalarNode("Approach the front door cautiously"),
-                ScalarNode("Observe the shadowy figure from a distance"),
-                ScalarNode("Check the perimeter of the house"),
-                ScalarNode("Call out to the figure in the window"),
-            ]),
-            "chosen": ScalarNode(None),            # underspecified until player acts
-        }),
-    })
+    vibe = template_schema_tuple(
+            template_str=(
+                "Describe the weather, vibe, and urgency each in one sentence. "
+                "Scene location: {scene.location}. Scene specifics: {scene.specifics}. "
+                "Time: {atmosphere.hour_of_day}:{atmosphere.minute_of_day}, PM flag: {atmosphere.post_meridian}. "
+                "Prior weather: {atmosphere.prior_weather}. Weather trend: {atmosphere.weather_changing}. "
+                "Current timestep: {atmosphere.time_limit} out of 12."
+            ),
+            schema=Schema(
+                name="Vibe",
+                fields=[
+                    FieldSpec(name="weather", type="str", required=True, description="Weather conditions."),
+                    FieldSpec(name="vibe", type="str", required=True, description="Atmosphere feeling."),
+                    FieldSpec(name="urgency", type="str", required=True, description="How urgent the moment feels."),
+                ],
+            ),
+            description="Weather, mood, and urgency for the current scene.",
+        )
+    registry.register(vibe[0])
+
+    little_house_description = simple_schema(
+        "Little House Description",
+        "description",
+        "Provide one atmospheric sentence describing the Little House in {town.name}.",
+    )
+    registry.register(little_house_description[0])
+
+    scene_description = simple_schema(
+        "Scene Description",
+        "description",
+        "Write one vivid sentence for the current scene at {scene.location}: {scene.specifics}.",
+    )
+    registry.register(scene_description[0])
+
+    invent_date = simple_schema(
+        "Start Date",
+        "date",
+        "Invent an exact date just a couple days after {interview.newspaper.date}."
+    )
+    registry.register(invent_date[0])
+
+    date_generator = simple_schma(
+        "Current Date",
+        "date",
+        "What is the exact next day after {atmosphere.prior_date.date}. Be sure to increment the month and decrement to 1 of the month if necessary."
+    )
+
+    root = MappingNode(
+        {
+            "interview": MappingNode(
+                {
+                    "first_name_hint": ScalarNode(" starts with the letter T ")
+                    "last_name_hint": ScalarNode(" ends with the letter R ")
+                    "name_guess1": ResolveableNode(*investigator_name),
+                    "name_guess2": ResolveableNode(*investigator_name),
+                    "name_guess3": ResolveableNode(*investigator_name),
+                    "name_guess4": ResolveableNode(*investigator_name),
+                    "destination_hint": ScalarNode(" somewhere remote "),
+                    "brochure1": ResolvableNode(*brochure),
+                    "brochure2": ResolvableNode(*brochure),
+                    "brochure3": ResolvableNode(*brochure),
+                    "brochure4": ResolvableNode(*brochure),
+                    "date_hint": ScalarNode(" in the late 20th century "),
+                    "newspaper": ResolveableNode(*newspaper_title),
+                    "case_hint": ScalarNode (" a strange case "),
+                    "case1": ResolvableNode(*case_headline),
+                    "case2": ResolvableNode(*case_headline),
+                    "case3": ResolvableNode(*case_headline),
+                    "case4": ResolvableNode(*case_headline),
+                    "archetype_hint": ScalarNode(" curious "),
+                    "archetype1": ResolveableNode(*investigator_archetype),
+                    "archetype2": ResolveableNode(*investigator_archetype),
+                    "archetype3": ResolveableNode(*investigator_archetype),
+                    "archetype4": ResolveableNode(*investigator_archetype),
+                    "interest_hint": ScalarNode(" keen "),
+                    "interest1": ResolveableNode(*interest),
+                    "interest2": ResolveableNode(*interest),
+                    "interest3": ResolveableNode(*interest),
+                    "interest4": ResolveableNode(*interest),
+                    "secrets_hint": ScalarNode(" dark "),
+                    "secret1": ResolveableNode(*personal_secret),
+                    "secret2": ResolveableNode(*personal_secret),
+                    "secret3": ResolveableNode(*personal_secret),
+                    "secret4": ResolveableNode(*personal_secret),
+                    "advantage_hint": ScalarNode(" a useful item "),
+                    "advantage1": Resolveabelnode(*advantage),
+                    "advantage2": Resolveabelnode(*advantage),
+                    "advantage3": Resolveabelnode(*advantage),
+                    "advantage4": Resolveabelnode(*advantage),
+                }
+            ),
+            "town": MappingNode(
+                {
+                    "name": place_holder,
+                    "location": place_holder,
+                    "economic": place_holder,
+                    "backstory": place_holder,
+                }
+            ),
+            "case": MappingNode(
+                {
+                    "name": place_holder,
+                    "case_date": place_holder,
+                    "description": place_holder,
+                }
+            ),
+            "investigator": MappingNode(
+                {
+                    "name": place_holder,
+                    "archetype": place_holder,
+                    "attributes": ResolvableNode(*attributes_modifiers),
+                    "wounds": ScalarNode(0),
+                    "instability": ScalarNode(0),
+                    "luck": ScalarNode(9),
+                    "secrets": place_holder,
+                    "interest": place_holder,
+                    "advantages": SequenceNode([]),
+                    "disadvantages": SequenceNode([]),
+                }
+            ),
+            "notebook": MappingNode(
+                {
+                    "logbook": SequenceNode([]), # A list of daybooks organized by date.
+                    "daybook": SequenceNode([]), # Every choice, clue, confirmed elements, and summarized descriptions of things
+                    "diary": SequenceNode([]),
+                    "clues": SequenceNode([]),
+                }
+            ),
+            "public": MappingNode(
+                {
+                    "rumors": SequenceNode([]),
+                    "conspiracies": SequenceNode([]),
+                    "player": SequenceNode([]),
+                }
+            ),
+            "locations": MappingNode(
+                {
+                    "Little House": MappingNode(
+                        {
+                            "name": ScalarNode("Little House"),
+                            "description": ResolveableNode(*little_house_description),
+                        }
+                    )
+                }
+            ),
+            "npcs": MappingNode(
+                {
+                    "Mable Jenner": MappingNode(
+                        {
+                            "first_name": ScalarNode("Mable"),
+                            "last_name": ScalarNode("Jenner"),
+                            "archetype": ScalarNode("Elderly Citizen"),
+                            "attitude": ScalarNode(5),
+                            "personality": ScalarNode("Clumsy"),
+                            "motivation": ScalarNode("Duty"),
+                            "location": ScalarNode("Little House"),
+                        }
+                    ),
+                    "Daryl Jenner": MappingNode(
+                        {
+                            "first_name": ScalarNode("Daryl"),
+                            "last_name": ScalarNode("Jenner"),
+                            "archetype": ScalarNode("Elderly Citizen"),
+                            "attitude": ScalarNode(4),
+                            "personality": ScalarNode("Introverted"),
+                            "motivation": ScalarNode("Survival"),
+                            "location": ScalarNode("Little House"),
+                        }
+                    ),
+                }
+            ),
+            "atmosphere": MappingNode(
+                {
+                    "hour_of_day": ScalarNode(8),
+                    "minute_of_day": ScalarNode(20),
+                    "post_meridian": ScalarNode(False),
+                    "prior_date": ResolveableNode(*invent_date),
+                    "date": ResolveableNode(*date_generator),
+                    "weather_changing": ScalarNode("Not changing"),
+                    "prior_weather": ScalarNode("Sunny"),
+                    "vibe": ResolvableNode(*vibe),
+                    "time_limit": ScalarNode(6),
+                }
+            ),
+            "scene": MappingNode(
+                {
+                    "location": ScalarNode("Little House"),
+                    "specifics": ScalarNode(
+                        "You are sitting in a soft bed in a bedroom in the Little House, "
+                        "chatting with Mable Jenners."
+                    ),
+                    "elements": SequenceNode(
+                        [
+                            "Mable on rocking chair",
+                            "newspaper within reach",
+                            "comfortable bed",
+                            "my suitcase",
+                            "eclectic electric lamp",
+                            "alarm clock reading 8:20 A.M.",
+                            "Mable holding a bible with a bookmark",
+                            "something about the light and the view of outside from the window feels eerie",
+                        ]
+                    ),
+                    "npcs": SequenceNode(["Mable Jenner"]),
+                    "description": ResolveableNode(*scene_description),
+                }
+            ),
+            "event": MappingNode(
+                {
+                    "description": ScalarNode("Investigation Progress"),
+                    "progress": ScalarNode("You see a suspect at the Location"),
+                    "consequences": ScalarNode(None),
+                    "escalation": ScalarNode(1),
+                }
+            ),
+            "action": MappingNode(
+                {
+                    "available": SequenceNode(
+                        [
+                            "Approach the front door cautiously",
+                            "Observe the shadowy figure from a distance",
+                            "Check the perimeter of the house",
+                            "Call out to the figure in the window",
+                        ]
+                    ),
+                    "chosen": ScalarNode(None),
+                }
+            ),
+        }
+    )
 
 
     # ------------------------------------------------------------------
@@ -495,22 +601,31 @@ def print_notebook(ctx: Context) -> None:
     """
     Window 1 – Investigator's Notebook.
 
-    Shows the case title, investigator motivation, and collected clues.
-    All nodes in this subtree are fully-specified ScalarNodes – no inference
-    is triggered.
+    Shows case details and investigator notes.
     """
     print(_SEP)
     print("INVESTIGATOR'S NOTEBOOK")
     print(_SEP)
-    print(f"Case:       {_scalar(ctx, 'case', 'title')}")
-    print(f"Motivation: {_scalar(ctx, 'case', 'motivation')}")
-    clues_node = ctx.query(Path("investigator", "clues"))
-    print("Clues:")
+    print(f"Case:        {_scalar(ctx, 'case', 'name')}")
+    print(f"Summary:     {_scalar(ctx, 'case', 'description')}")
+    print(f"Interest:    {_query_text(ctx, 'investigator', 'interest')}")
+
+    clues_node = ctx.query(Path("notebook", "clues"))
+    print("\nClues:")
     if isinstance(clues_node, SequenceNode) and len(clues_node) > 0:
         for i, clue in enumerate(clues_node, 1):
             print(f"  {i}. {_fmt(clue)}")
     else:
         print("  (none yet)")
+
+    for key in ("logbook", "daybook", "diary"):
+        entries = ctx.query(Path("notebook", key))
+        print(f"\n{key.title()}:")
+        if isinstance(entries, SequenceNode) and len(entries) > 0:
+            for i, entry in enumerate(entries, 1):
+                print(f"  {i}. {_fmt(entry)}")
+        else:
+            print("  (empty)")
     print()
 
 
@@ -518,17 +633,45 @@ def print_status(ctx: Context) -> None:
     """
     Window 2 – Investigator's Status.
 
-    Displays attributes (health, sanity, instability) and resolves the
-    ``investigator.secrets`` PromptNode lazily on the first call.
+    Displays the investigator identity, traits, and condition track.
     """
     print(_SEP)
     print("INVESTIGATOR STATUS")
     print(_SEP)
-    print(f"Name:        {_scalar(ctx, 'investigator', 'name')}")
-    print(f"Occupation:  {_scalar(ctx, 'investigator', 'occupation')}")
-    print(f"Health:      {_scalar(ctx, 'investigator', 'health')}")
-    print(f"Sanity:      {_scalar(ctx, 'investigator', 'sanity')}")
-    print(f"Instability: {_scalar(ctx, 'investigator', 'instability')} / 5")
+    first = _scalar(ctx, "investigator", "first_name")
+    last = _scalar(ctx, "investigator", "last_name")
+    print(f"Name:         {first} {last}")
+    print(f"Archetype:    {_query_text(ctx, 'investigator', 'archetype')}")
+    print(f"Interest:     {_query_text(ctx, 'investigator', 'interest')}")
+    print(f"Wounds:       {_scalar(ctx, 'investigator', 'wounds')}")
+    print(f"Instability:  {_scalar(ctx, 'investigator', 'instability')}")
+    print(f"Luck:         {_scalar(ctx, 'investigator', 'luck')}")
+
+    attrs = ctx.query(Path("investigator", "attributes"))
+    print("\nAttributes:")
+    if isinstance(attrs, ResolvableNode):
+        if attrs.result is None:
+            print("  (pending resolution)")
+        else:
+            print(f"  {_fmt(attrs.result)}")
+    else:
+        print(f"  {_fmt(attrs)}")
+
+    print("\nAdvantages:")
+    adv = ctx.query(Path("investigator", "advantages"))
+    if isinstance(adv, SequenceNode) and len(adv) > 0:
+        for i, item in enumerate(adv, 1):
+            print(f"  {i}. {_fmt(item)}")
+    else:
+        print("  (none)")
+
+    print("\nDisadvantages:")
+    dis = ctx.query(Path("investigator", "disadvantages"))
+    if isinstance(dis, SequenceNode) and len(dis) > 0:
+        for i, item in enumerate(dis, 1):
+            print(f"  {i}. {_fmt(item)}")
+    else:
+        print("  (none)")
 
     # Demonstrate lazy inference: show the node state before querying, then resolve.
     secrets_path = Path("investigator", "secrets")
@@ -542,14 +685,19 @@ def print_atmosphere(ctx: Context) -> None:
     """
     Window 3 – Atmosphere Description.
 
-    Shows time of day and weather (fully specified), then resolves the
-    ``atmosphere.vibe`` PromptNode lazily.
+    Shows time and weather context, then resolves atmosphere.vibe lazily.
     """
     print(_SEP)
     print("ATMOSPHERE")
     print(_SEP)
-    print(f"Time of day: {_scalar(ctx, 'atmosphere', 'time_of_day')}")
-    print(f"Weather:     {_scalar(ctx, 'atmosphere', 'weather')}")
+    hour = _scalar(ctx, "atmosphere", "hour_of_day")
+    minute = _scalar(ctx, "atmosphere", "minute_of_day")
+    is_pm = _scalar(ctx, "atmosphere", "post_meridian")
+    am_pm = "PM" if is_pm else "AM"
+    print(f"Time:         {hour}:{int(minute):02d} {am_pm}" if isinstance(minute, int) else f"Time:         {hour}:{minute} {am_pm}")
+    print(f"Prior weather: {_scalar(ctx, 'atmosphere', 'prior_weather')}")
+    print(f"Trend:         {_scalar(ctx, 'atmosphere', 'weather_changing')}")
+    print(f"Time limit:    {_scalar(ctx, 'atmosphere', 'time_limit')} / 12")
 
     vibe_path = Path("atmosphere", "vibe")
     pre_node = _resolve_path(ctx.root, vibe_path)
@@ -562,30 +710,33 @@ def print_scene(ctx: Context) -> None:
     """
     Window 4 – Scene Description.
 
-    Shows location (fully specified), resolves the ``scene.sensory`` PromptNode
-    lazily (demonstrating before/after inference), then lists the NPCs present.
+    Shows location, scene details, and currently present NPCs.
     """
     print(_SEP)
     print("SCENE DESCRIPTION")
     print(_SEP)
     print(f"Location: {_scalar(ctx, 'scene', 'location')}")
-    print(f"Episode:  {_scalar(ctx, 'scene', 'episode')}")
+    print(f"Details:  {_scalar(ctx, 'scene', 'specifics')}")
 
-    # Sensory is a PromptNode – illustrate the lazy resolution flow.
-    sensory_path = Path("scene", "sensory")
-    pre_node = _resolve_path(ctx.root, sensory_path)
-    print(f"Sensory [before query]: {_fmt(pre_node)}")
-    print(f"Sensory [after  query]: {_query_text(ctx, 'scene', 'sensory')}")
+    # Description is a PromptNode in the new scene model.
+    description_path = Path("scene", "description")
+    pre_node = _resolve_path(ctx.root, description_path)
+    print(f"Description [before query]: {_fmt(pre_node)}")
+    print(f"Description [after  query]: {_query_text(ctx, 'scene', 'description')}")
 
-    # NPCs – fully specified SequenceNode, no inference.
+    elements = ctx.query(Path("scene", "elements"))
+    print("\nElements:")
+    if isinstance(elements, SequenceNode) and len(elements) > 0:
+        for i, item in enumerate(elements, 1):
+            print(f"  {i}. {_fmt(item)}")
+    else:
+        print("  (none)")
+
     npcs_node = ctx.query(Path("scene", "npcs"))
-    print("NPCs present:")
+    print("\nNPCs present:")
     if isinstance(npcs_node, SequenceNode) and len(npcs_node) > 0:
-        for npc in npcs_node:
-            if isinstance(npc, MappingNode):
-                name = _fmt(npc.get("name"))
-                doing = _fmt(npc.get("doing"))
-                print(f"  * {name} – {doing}")
+        for i, npc in enumerate(npcs_node, 1):
+            print(f"  {i}. {_fmt(npc)}")
     else:
         print("  (none)")
     print()
@@ -595,18 +746,16 @@ def print_event(ctx: Context) -> None:
     """
     Window 5 – Event Description.
 
-    Shows the current scene event and investigation progress roll.
-    The ``consequences`` field is underspecified (ScalarNode(None)) until
-    the player advances the scene.
+    Shows the event narrative and current escalation state.
     """
     print(_SEP)
     print("SCENE EVENT")
     print(_SEP)
-    print(f"Current event:  {_scalar(ctx, 'event', 'current')}")
-    print(f"Progress roll:  {_scalar(ctx, 'event', 'progress')}")
+    print(f"Description:    {_scalar(ctx, 'event', 'description')}")
+    print(f"Progress:       {_scalar(ctx, 'event', 'progress')}")
     consequences = _scalar(ctx, "event", "consequences")
     print(f"Consequences:   {consequences if consequences is not None else '<pending>'}")
-    print(f"Escalation:     {_scalar(ctx, 'event', 'escalation')} / 5")
+    print(f"Escalation:     {_scalar(ctx, 'event', 'escalation')} / 12")
     print()
 
 
@@ -648,6 +797,261 @@ def print_gm(ctx: Context, last_message: str | None = None) -> None:
         print("  (awaiting input – type 'help' for commands)")
     print()
 
+# ---------------------------------------------------------------------------
+# Game State Machine
+# ---------------------------------------------------------------------------
+
+# "The interview is the part of the game where the program 'extracts' the details of the situation from "
+# "the player, basically a kind of interview based character creation process."
+# "It follows these steps:"
+# "1) The Player is welcomed to the game, and the Player 'wakes up' and is asked 'do you remember your name?'"
+# "2) Archetype: The player is expected to then choose from one of 8 archetypes 'Oh yeah, I am a __, I remember that much!'"
+# "2.5) OR the player could pick the option: 'No those aren't right ... <provide archetype_hint> and try to remember the truth!'"
+# "3) Player Names: The Player is shown a list of names 1 to 4 and selects 'Oh, I think my name is __ __' "
+# "3.5) OR the player could pick the option: 'No those aren't right ... friends I remember maybe? <provide name hints> and concentrate!'"
+# "4) The player is welcomed by name, and is asked 'what do you remember?' and shown a brochure with 4 options."
+# "5) Town: The player is expected to answer with number 1 to 4 'Oh yeah, __ was where I was headed, I remember now!'"
+# "5.5) OR the player could pick the option: 'None of those sound right ... <provide destination hint> and turn the page.' and go back to step 2)"
+# "6) Newspaper Title: The player is expected to confirm the newspaper title."
+# "6.5) OR the player says 'No, that's can't be.  My eyes are still fuzzy though, maybe I read it wrong. The day should be <provide date_hint>'"
+# "7) Case: The player is expected to answer with number 1 to 4 'I\'m investigating the case of _'"
+# "7.5) OR the player could pick the option: 'None of these ring a bell ... <provide case_hint> and turn to the next newspaper page.'"
+# "8) Interest: The player is expected to answer with number 1 to 4 'I\'m not ready to tell Mable this, but my real reason for being here is __'"
+# "8.5) OR the player could pick the option: 'Maybe somebody would expect something like that but they don't know my interest is <provide interest_hint>'"
+# "9) Secrets: The player is expected to answer with number 1 to 4 'I\'ll never willingly tell a soul, but _.'"
+# "9.5) OR the player could pick the option: 'Ha! My real secret is more <provide secret_hint>.'"
+# "10) Then, until enough secrets are rolled, repeat step 9."
+# "11) Advantages: The player is expected to answer with number 1 to 4 'I packed the __ because __.'"
+# "11.5) OR the player could pick the option: 'No I felt I needed something for <suitcase_hint>.' and regenerate."
+# "11.6) OR the player could pick the option: 'I didn't bring anything else with me.'"
+# "12) Then, until up to 3 advantages have been rolled, repeat step 11."
+
+class Phase(Enum):
+    GAME_BEGIN = auto()
+    INTERVIEW_CHOOSE_ARCHETYPE = auto()
+    INTERVIEW_CHOOSE_NAME = auto()
+    INTERVIEW_CHOOSE_TOWN = auto()
+    INTERVIEW_CHOOSE_NEWSPAPER = auto()
+    INTERVIEW_CHOOSE_CASE = auto()
+    INTERVIEW_CHOOSE_INTEREST = auto()
+    INTERVIEW_CHOOSE_SECRETS = auto()
+    INTERVIEW_CHOOSE_ADVANTAGES = auto()
+    GAME_OVER = auto()
+
+class Verb(Enum):
+    CMD_NOOP = auto()
+    CMD_QUIT = auto()
+    CMD_CHOICE = auto()
+    CMD_NOPE = auto()
+    CMD_CONFIRM = auto()
+    CMD_HELP = auto()
+    CMD_LOOK = auto()
+    CMD_DO_CHOICE = auto()
+    CMD_DO_GENERIC = auto()
+    QUESTION_IS = auto()
+    QUESTION = auto()
+
+def to_verb(tokens: [str]) -> Verb:
+    if tokens[0].upper() == 'QUIT' or tokens[0].upper() == 'EXIT':
+        return Verb.CMD_QUIT
+    if tokens[0].isnumeric():
+        return Verb.CMD_CHOICE
+    if tokens[0].upper() == 'N' or tokens[0].upper() == 'NO' or tokens[0].upper() == "NOPE":
+        return Verb.CMD_NOPE
+    if tokens[0].upper() == 'YES' or tokens[0].upper() == "Y":
+        return Verb.CMD_CONFIRM
+    if tokens[0].upper() == 'H' or tokens[0].upper() == "HELP":
+        return Verb.CMD_HELP
+    if tokens[0].upper() == 'L' or tokens[0].upper() == "LOOK" or tokes[0].upper() == 'Q' or tokens[0].upper() == 'QUERY':
+        return Verb.CMD_LOOK
+    if tokens[0].upper() == 'DO' and (length(tokens) <= 1):
+        return Verb.CMD_DO_CHOICE
+    if tokens[0].upper() == 'DO':
+        return Verb.CMD_DO_GENERIC
+    if tokens[0].upper() == 'IS' and tokens[-1][-1] == '?':
+        return Verb.QUESTION_IS
+    if tokens[-1][-1] == '?':
+        return Verb.QUESTION
+    return Verb.CMD_NOOP
+    
+
+@dataclass
+class MachineState:
+    phase: Phase = Phase.GAME_BEGIN
+
+@dataclass
+class Transition:
+    next_phase: Phase
+    prompt: str
+    options: [Command]
+
+@dataclass
+class Command:
+    verb: Verb = CMD_NOOP
+    ordinal: int = 0
+    arg: str = ""
+
+cmd_noop = Command()
+
+def to_command(tokens: [str]) -> Command:
+    verb = to_verb(tokens)
+    if (verb == Verb.CMD_CHOICE):
+        ordinal = int(tokens[0])
+    else:
+        ordinal = 0
+    if length(tokens) > 1:
+        arg = tokens[1]
+    else:
+        arg = ""
+    return Command(verb, ordinal, arg)
+
+def is_compatible_command(protoype: Command, cmd: Command) -> bool:
+    if prototype.verb == cmd.verb:
+        if prototype.verb == Verb.CMD_CHOICE:
+            return prototype.ordinal == cmd.ordinal
+        return True
+    return False
+
+def is_valid_option(valid_options: [Command], cmd: Command) -> bool:
+    if not valid_options and cmd.verb = Verb.CMD_NOOP:
+        return True
+    for valid in valid_options:
+        if is_compatible_command(valid, cmd):
+            return True
+    return False
+
+def option_to_prompt(option: Command) -> str:
+    if option.verb == Verb.CMD_CHOICE:
+        return f"{option.ordinal}: {option.arg}"
+    if options.verb == Verb.CMD_NOPE:
+        return f"No: {option.arg}"
+    if options.verb == Verb.CMD_CONFIRM:
+        return f"Yes: {option.arg}"
+    return "" 
+
+def to_prompt(options: [Command]) -> str:
+    result = ""
+    for option in options:
+        result += option_to_prompt(option) + "\n"
+    return result
+
+Handler = Callable[[Context, MachineState, Command], Transition]
+
+
+def handle_game_begin(ctx: Context, ms: MachineState, cmd: Command) -> Transition:
+    if cmd.verb == CMD_NOOP:
+        print("=" * 60)
+        print("  LITTLE HOUSE IN THE EERIE")
+        print("  A Solo Paranormal Investigation")
+        print("=" * 60)
+        print()
+    if cmd.verb == CMD_CONFRIM:
+        return handle_interview_choose_archetype(ctx, ms=MachineState(Phase.INTERVIEW_CHOOSE_ARCHETYPE), cmd=cmd_noop)
+    prompt = (
+        "You wake up with a dry mouth, and sticky eyes.  Gradually, the room comes into focus."
+        "You sit up in a soft, clean bed, in a small room, with rustic furnishings."
+        "An old woman in a flower dress is rocking in a chair, watching you as you awake."
+        "She seems relived to see you stirring."
+        "You try to remember how you got here; it is gradually coming back to you."
+        'The woman says, "Hello, my name is Mable Jenners. I\'m sorry we had to meet under such ... frightening circumstances."'
+        'Mable continues, "You took a nasty bump to the head. Do you remember why you are here?')
+    options = [Command(verb=CMD_CONFIRM, args=["Yes, I'm here to start an investigation!"])]
+    return Transition(next_phase=ms.phase, prompt=prompt, options=options)
+
+def handle_interview_choose_name(ctx: Context, ms: MachineState, cmd: Command) -> Transition:
+    prompt = (
+        "You're name? What was it exactly? You are pretty sure that: "
+    )
+    if cmd.verb == CMD_CHOICE:
+        if cmd.ordinal == 1 and cmd.arg.strip() != "":
+            _set_keyed_node(ctx, ScalarNode(cmd.arg), 'interview', 'first_name_hint')
+        if cmd.ordinal == 2 and cmd.arg.strip() != "":
+            _set_keyed_node(ctx, ScalarNode(cmd.arg), 'interview', 'last_name_hint')
+        if cmd.ordinal == 3:
+            node = ctx.query(Path('interview', 'name_guess1'))
+        if cmd.ordinal == 4:
+            node = ctx.query(Path('interview', 'name_guess2'))
+        if cmd.ordinal == 5:
+            node = ctx.query(Path('interview', 'name_guess3'))
+        if cmd.ordinal == 6:
+            node = ctx.query(Path('interview', 'name_guess4'))
+        if cmd.ordinal >= 3 or cmd.ordinal <= 6:
+            _set_keyed_node(ctx, node, 'investigator', 'name')
+            return handle_interview_choose_town(ctx, MachineState(Phase.INTERVIEW_CHOOSE_ARCHETYPE), cmd_noop)
+        options = [Command(verb=CMD_CHOICE, ordinal=1, args=f"My first name: {_scalar(ctx, 'interview', 'first_name_hint')}")
+                ,Command(verb=CMD_CHOICE, ordinal=2, args=f"The rest of my name: {_scalar(ctx), 'interview', 'last_name_hint'}")
+                ,Command(verb=CMD_NOPE, args="At least you know that much; try thinking again ...")]
+        return Transition(next_phase=ms.phase, prompt=prompt, options=options)
+    if cmd.verb == CMD_NOPE or cmd.verb == CMD_CHOICE:
+        _invalidate(ctx, 'interview', 'name_guess1')
+        _invalidate(ctx, 'interview', 'name_guess2')
+        _invalidate(ctx, 'interview', 'name_guess3')
+        _invalidate(ctx, 'interview', 'name_guess4')
+    options = [Command(verb=CMD_CHOICE, ordinal=1, args=f"My first name: {_scalar(ctx, 'interview', 'first_name_hint')}")
+              ,Command(verb=CMD_CHOICE, ordinal=2, args=f"The rest of my name: {_scalar(ctx), 'interview', 'last_name_hint'}")
+              ,Command(verb=CMD_CHOICE, ordinal=3, args=query_investigator_name(ctx, NameMode.FULL, 'interview', 'name_guess1'))
+              ,Command(verb=CMD_CHOICE, ordinal=4, args=query_investigator_name(ctx, NameMode.FULL, 'interview', 'name_guess2'))
+              ,Command(verb=CMD_CHOICE, ordinal=5, args=query_investigator_name(ctx, NameMode.FULL, 'interview', 'name_guess3'))
+              ,Command(verb=CMD_CHOICE, ordinal=6, args=query_investigator_name(ctx, NameMode.FULL, 'interview', 'name_guess4'))
+              ,Command(verb=CMD_NOPE, args="Those sound like people with similiar interests; try thinking again ...")]
+    return Transition(next_phase=ms.phase, prompt=prompt, options=options)
+
+def handle_interview_choose_archetype(ctx: Context, ms: MachineState, cmd: Command) -> Transition:
+    prompt = (
+        "You know you are an investigator of some kind, but what kind exactly? Was it: "
+    )
+    if cmd.verb == CMD_CHOICE:
+        if cmd.ordinal == 1 and cmd.arg.strip() != "":
+            _set_keyed_node(ctx, ScalarNode(cmd.arg), 'interview', 'archetype_hint')
+        if cmd.ordinal == 2:
+            archetype = _scalar(ctx, 'interview', 'archetype1', 'archetype')
+        if cmd.ordinal == 3:
+            archetype = _scalar(ctx, 'interview', 'archetype1', 'archetype')
+        if cmd.ordinal == 4:
+            archetype = _scalar(ctx, 'interview', 'archetype2', 'archetype')
+        if cmd.ordinal == 5:
+            archetype = _scalar(ctx, 'interview', 'archetype3', 'archetype')
+        if cmd.ordinal >= 2 or cmd.ordinal <= 5:
+            _set_keyed_node(ctx, ScalarNode(archetype), 'investigator', 'archetype')
+            return handle_interview_choose_name(ctx, MachineState(Phase.INTERVIEW_CHOOSE_NAME), cmd_noop)
+        options = [Command(verb=CMD_CHOICE, ordinal=1, args=f"I describe myself as: {_scalar(ctx, 'interview', 'archetype_hint')}")
+                ,Command(verb=CMD_NOPE, args="You recall your methods and approach; try thinking again ...")]
+        return Transition(next_phase=ms.phase, prompt=prompt, options=options)
+
+    if cmd.verb == CMD_NOPE:
+        _invalidate(ctx, 'interview', 'archetype1')
+        _invalidate(ctx, 'interview', 'archetype2')
+        _invalidate(ctx, 'interview', 'archetype3')
+        _invalidate(ctx, 'interview', 'archetype4')
+    options = [Command(verb=CMD_CHOICE, ordinal=1, args=f"I describe myself as: {_scalar(ctx, 'interview', 'archetype_hint')}")
+              ,Command(verb=CMD_CHOICE, ordinal=2, args=f"{_query_text(ctx, 'interview', 'archetype1', 'archetype')}?")
+              ,Command(verb=CMD_CHOICE, ordinal=3, args=f"{_query_text(ctx, 'interview', 'archetype2', 'archetype')}?")
+              ,Command(verb=CMD_CHOICE, ordinal=4, args=f"{_query_text(ctx, 'interview', 'archetype3', 'archetype')}?")
+              ,Command(verb=CMD_CHOICE, ordinal=5, args=f"{_query_text(ctx, 'interview', 'archetype4', 'archetype')}?")
+              ,Command(verb=CMD_NOPE, args="None of those are eactly right; try thinking again ...")]
+    return Transition(next_phase=ms.phase, prompt=prompt, options=options)
+
+
+    # print('She continues, "How are you feeling?"')
+    # print('You reply, "Ugh. Minor pains all over. I feel like I was in a car wreck!"')
+    # print('Mable responds, "Oh, dear! Well, that is because _you were_ in a car wreck! I must say!"')
+    # print('You reply, "Oh, wow! Uh ... where am I?"')
+    # print('Mable replies, "Well, what do you remember?"')
+    # print('I was travelling to a little town somewhere?  To investigate a crime?  Or something mysterious?')
+    # print('Mable hands you a travel brochure and says: "We found this in your car. Does it help jog your memory?"')
+    # print('You being reading the travel brochure. The Title is "Little Known Towns in Eerie Places!"')
+    # print('Then it says, "Do you have investigative proclivities?  A need to _see_ beyond the veil?  Well, these are the places you should seriously consider visiting!"')
+    # print("Type 'help' for commands and options.\n")
+
+def handle_game_over(ctx: Context, ms: MachineState, cmd: Command) -> Transition:
+    return Transition(Phase.GAME_OVER, should_quit=True)
+
+HANDLERS: dict[Phase, Handler] = {
+    Phase.GAME_BEGIN: handle_game_begin,
+    Phase.INTERVIEW_CHOOSE_ARCHETYPE: handle_interview_choose_archetype
+    Phase.INTERVIEW_CHOOSE_NAME: handle_interview_choose_name,
+    Phase.GAME_OVER: handle_game_over,
+}
 
 # ---------------------------------------------------------------------------
 # REPL
@@ -656,10 +1060,10 @@ def print_gm(ctx: Context, last_message: str | None = None) -> None:
 _HELP_TEXT = """
 Commands:
   help                  Show this help.
-  look notebook         Investigator's narrative notebook (case, clues).
-  look status           Investigator's attributes and secrets (lazy inference).
-  look atmosphere       Atmosphere and vibe (lazy inference).
-  look scene            Scene description – sensory detail is a PromptNode.
+    look notebook         Case, motivation, clues, and notes.
+    look status           Investigator profile, stats, traits, and secrets.
+    look atmosphere       Time, weather trend, and vibe (lazy inference).
+    look scene            Scene details and description (lazy inference).
   look event            Current scene event and progress.
   look action           Available actions.
   choose action <n>     Mark action n as the chosen action.
@@ -671,30 +1075,12 @@ PromptNodes (marked as 'PromptNode(PENDING)') resolve the first time
 they are queried and cache their result for subsequent queries.
 """
 
-
 def run_repl(ctx: Context) -> None:
     """Start the interactive REPL loop."""
-    print("=" * 60)
-    print("  LITTLE HOUSE IN THE EERIE")
-    print("  A Solo Horror Investigation")
-    print("=" * 60)
-    print()
-    print("You wake up with a dry mouth, and sticky eyes.  Gradually, the room comes into focus.")
-    print("You sit up in a soft, clean bed, in a small room, with rustic furnishings.")
-    print("An old woman in a flower dress is rocking in a chair, watching you as you awake.")
-    print("She seems relived so see you stirring.")
-    print("You try to remember how you got here; it is gradually coming back to you.")
-    print('The woman says, "Hello, my name is Mable Jenners. I\'m sorry we had to meet under such ... frightening circumstances."')
-    print('She continues, "How are you feeling?"')
-    print('You reply, "Ugh. Minor pains all over. I feel like I was in a car wreck!"')
-    print('Mable responds, "Oh, dear! Well, that is because _you were_ in a car wreck! I must say!"')
-    print('You reply, "Oh, wow! Uh ... where am I?"')
-    print('Mable replies, "Well, what do you remember?"')
-    print("Type 'help' for commands.\n")
 
     gm_message: str | None = None
-    print_action(ctx)
-    print_gm(ctx, gm_message)
+    ms = MachineState(phase=Phase.GAME_BEGIN)
+    valid_options = [Command(verb=CMD_CONFIRM, args=["Yes, I'm here to start an investigation!"])]
 
     while True:
         try:
@@ -706,20 +1092,18 @@ def run_repl(ctx: Context) -> None:
         if not raw:
             continue
 
-        tokens = raw.lower().split(maxsplit=1)
-        cmd = tokens[0]
-        rest = tokens[1].strip() if len(tokens) > 1 else ""
+        tokens = raw.strip().split(maxsplit=1)
+        cmd = to_command(tokens)
 
-        if cmd in ("quit", "exit"):
+        if cmd.verb == Verb.CMD_QUIT:
             print("Farewell, investigator.")
             break
 
-        elif cmd == "help":
+        elif cmd.verb == Verb.CMD_HELP:
             print(_HELP_TEXT)
-            gm_message = None
-
-        elif cmd in ("look", "query"):
-            target = rest
+            
+        elif cmd.verb == Verb.CMD_LOOK:
+            target = cmd.arg
             if target == "notebook":
                 print_notebook(ctx)
             elif target == "status":
@@ -738,38 +1122,17 @@ def run_repl(ctx: Context) -> None:
                     f"Unknown target '{rest}'. "
                     "Try: notebook, status, atmosphere, scene, event, action\n"
                 )
-
-        elif cmd == "choose" and rest.startswith("action "):
-            num_str = rest[len("action "):].strip()
-            try:
-                n = int(num_str)
-                available = ctx.query(Path("action", "available"))
-                if isinstance(available, SequenceNode) and 1 <= n <= len(available):
-                    ctx.set(Path("action", "chosen"), ScalarNode(n))
-                    chosen_text = _fmt(available.get(n - 1))
-                    gm_message = f"Action {n} chosen: {chosen_text}"
-                else:
-                    max_n = len(available) if isinstance(available, SequenceNode) else "?"
-                    print(f"Invalid action number '{n}'. Choose between 1 and {max_n}.\n")
-                    continue
-            except ValueError:
-                print(f"'{num_str}' is not a valid number.\n")
-                continue
-
-        elif cmd == "question":
-            if not rest:
-                print("Usage: question <your yes/no question>\n")
-                continue
-            answer = random.choice(_ORACLE_ANSWERS)
-            gm_message = f"Q: {rest}\n  A: {answer}"
-
-        else:
-            print(f"Unknown command '{raw}'. Type 'help' for commands.\n")
+        
+        elif not is_compatible_command(valid_options, cmd):
+            print(f"Command is not valid at this time: {to_str(cmd)}.")
             continue
 
-        # Action and Co-GM windows always print last after every recognised command.
-        print_action(ctx)
-        print_gm(ctx, gm_message)
+        handler = HANDLERS[ms.phase]
+        tr = handler(ctx, ms, cmd)
+        ms.phase = tr.next_phase
+        prompt = tr.prompt + "\n"
+        prompt += to_prompt(tr.options)
+        print(prompt)
 
 
 def main() -> None:

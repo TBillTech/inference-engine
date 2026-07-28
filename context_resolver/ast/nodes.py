@@ -345,6 +345,13 @@ class SequenceNode(Node):
             return self._items[index]
         return None
 
+    def set(self, index: int, node: Node) -> None:
+        """Set the node at *index*, or append it."""
+        if 0 <= index < len(self._items):
+            self._items[index] = node
+        else:
+            self.append(node)
+
     def append(self, node: Node) -> None:
         """Append *node* to the end of this sequence."""
         self._items.append(node)
