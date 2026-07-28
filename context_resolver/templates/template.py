@@ -21,6 +21,7 @@ Built-in template types
 from __future__ import annotations
 
 import string
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -76,6 +77,7 @@ class Template:
         KeyError
             If a required variable is missing from *bindings*.
         """
+        bindings = _expand_dotted_bindings(bindings)
         try:
             return self.template_str.format_map(bindings)
         except KeyError as exc:
@@ -126,6 +128,31 @@ class Template:
 
     def __repr__(self) -> str:
         return f"Template(name={self.name!r})"
+
+
+def _expand_dotted_bindings(bindings: dict[str, Any]) -> dict[str, Any]:
+    """Expand dotted binding keys into nested namespace objects for format_map."""
+    tree: dict[str, Any] = {}
+
+    def _wrap(value: Any) -> Any:
+        if isinstance(value, dict):
+            return SimpleNamespace(**{key: _wrap(child) for key, child in value.items()})
+        if isinstance(value, list):
+            return [_wrap(item) for item in value]
+        return value
+
+    for key, value in bindings.items():
+        parts = key.split(".")
+        current = tree
+        for part in parts[:-1]:
+            existing = current.get(part)
+            if not isinstance(existing, dict):
+                existing = {}
+                current[part] = existing
+            current = existing
+        current[parts[-1]] = _wrap(value)
+
+    return {key: _wrap(value) for key, value in tree.items()}
 
 
 class TemplateRegistry:

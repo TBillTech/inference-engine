@@ -211,11 +211,24 @@ class Resolver:
             else None
         )
 
+        node_metadata = node.metadata
+        temp_hint = node_metadata.get("temperature", 0.0)
+        try:
+            temperature = float(temp_hint)
+        except (TypeError, ValueError):
+            temperature = 0.0
+        extra = node_metadata.get("extra")
+        extra_params = dict(extra) if isinstance(extra, dict) else {}
+
         request = ResolutionRequest(
             prompt=rendered_prompt,
             output_schema=output_schema_dict,
             query_path=path,
             dependencies=node.effective_dependencies(),
+            metadata=node_metadata,
+            model=node_metadata.get("model") if isinstance(node_metadata.get("model"), str) else None,
+            temperature=temperature,
+            extra=extra_params,
         )
 
         # Call the strategy (which delegates to a provider).

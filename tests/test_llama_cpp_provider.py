@@ -96,6 +96,30 @@ class TestLocalLlamaCppProvider:
 
         assert captured[0]["temperature"] == pytest.approx(0.7)
 
+    def test_resolve_passes_extra_params(self):
+        provider = LocalLlamaCppProvider(base_url="http://127.0.0.1:8080")
+        captured: list[dict] = []
+
+        def fake_urlopen(req, timeout):
+            body = json.loads(req.data.decode("utf-8"))
+            captured.append(body)
+            stub = _urlopen_stub(_make_response({"key": "value"}))
+            return stub
+
+        with patch(
+            "context_resolver.inference.llama_cpp_provider.urlopen",
+            side_effect=fake_urlopen,
+        ):
+            provider.resolve(
+                ResolutionRequest(
+                    prompt="test",
+                    extra={"seed": -1, "top_p": 0.95},
+                )
+            )
+
+        assert captured[0]["seed"] == -1
+        assert captured[0]["top_p"] == pytest.approx(0.95)
+
     def test_resolve_passes_model_override(self):
         provider = LocalLlamaCppProvider(
             base_url="http://127.0.0.1:8080", model="default-model"

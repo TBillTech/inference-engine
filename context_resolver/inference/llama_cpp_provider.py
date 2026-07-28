@@ -53,6 +53,7 @@ from context_resolver.inference.provider import (
 
 _DEFAULT_BASE_URL = "http://127.0.0.1:8080"
 _DEFAULT_MODEL = "local"
+_DEFAULT_MAX_TOKENS = 192
 
 
 class LocalLlamaCppProvider(ResolutionProvider):
@@ -100,6 +101,11 @@ class LocalLlamaCppProvider(ResolutionProvider):
             model
             or os.environ.get("LLAMA_CPP_MODEL", _DEFAULT_MODEL)
         )
+        max_tokens_env = os.environ.get("LLAMA_CPP_MAX_TOKENS")
+        try:
+            self._default_max_tokens = int(max_tokens_env) if max_tokens_env else _DEFAULT_MAX_TOKENS
+        except ValueError:
+            self._default_max_tokens = _DEFAULT_MAX_TOKENS
         self._api_key = api_key or os.environ.get("LLAMA_CPP_API_KEY")
         self._timeout = timeout
 
@@ -136,10 +142,22 @@ class LocalLlamaCppProvider(ResolutionProvider):
             "messages": messages,
             "temperature": request.temperature,
         }
+        # Keep local generations bounded unless explicitly overridden.
+        payload["max_tokens"] = self._default_max_tokens
+        if request.extra:
+            payload.update(request.extra)
 
         # Request JSON output when a schema is provided.
         if request.output_schema is not None and self.supports_structured_output():
             payload["response_format"] = {"type": "json_object"}
+            # Reasoning-capable chat templates can spend the token budget in
+            # hidden thought tokens and never emit final JSON content.
+            # For structured output, default to non-thinking unless overridden.
+            chat_kwargs = payload.get("chat_template_kwargs")
+            if not isinstance(chat_kwargs, dict):
+                chat_kwargs = {}
+            chat_kwargs.setdefault("enable_thinking", False)
+            payload["chat_template_kwargs"] = chat_kwargs
 
         url = f"{self._base_url}/v1/chat/completions"
         raw_response = self._post(url, payload)

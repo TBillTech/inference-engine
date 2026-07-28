@@ -10,6 +10,7 @@ from context_resolver.query.resolver import Resolver
 from context_resolver.query.passes import ResolutionPass
 from context_resolver.context.context import Context, NodeNotFoundError
 from context_resolver.inference.mock_provider import MockProvider
+from context_resolver.inference.provider import ResolutionProvider, ResolutionResult
 from context_resolver.templates.template import Template, TemplateRegistry
 
 
@@ -232,6 +233,44 @@ class TestContextResolvableNode:
         assert greeting_node.is_configured()
         assert greeting_node.input_bindings == {"name": Path("name")}
         assert greeting_node.dependencies == [Path("name")]
+
+    def test_resolvable_node_metadata_temperature_flows_to_request(self):
+        captured_temperature = None
+
+        class RecordingProvider(ResolutionProvider):
+            name = "recording"
+
+            def resolve(self, request):
+                nonlocal captured_temperature
+                captured_temperature = request.temperature
+                return ResolutionResult(data={"greeting": "Hello, Carol!"}, provider=self.name)
+
+        schema = Schema(
+            name="GreetSchema",
+            fields=[FieldSpec("greeting", type="str", required=True)],
+        )
+        node = ResolvableNode(
+            template_ref="greet",
+            input_bindings={"name": Path("name")},
+            output_schema=schema,
+            metadata={"temperature": 0.85},
+        )
+        root = MappingNode({
+            "name": ScalarNode("Carol"),
+            "greeting": node,
+        })
+
+        registry = TemplateRegistry()
+        registry.register(Template("greet", "Say hello to {name}."))
+
+        resolver = Resolver(
+            template_registry=registry,
+            passes=[ResolutionPass(RecordingProvider())],
+        )
+        ctx = Context(root=root, resolver=resolver)
+
+        ctx.query(Path("greeting"))
+        assert captured_temperature == pytest.approx(0.85)
 
 
 # ---------------------------------------------------------------------------
