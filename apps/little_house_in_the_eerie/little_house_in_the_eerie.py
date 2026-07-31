@@ -405,13 +405,15 @@ def build_initial_context() -> Context:
                 "*** End list of prior suggestions.\n"
                 "The investigator archetype is {investigator.archetype}. "
                 "Town: {town.name}, location: {town.location}, economy: {town.economic}, backstory: {town.backstory}. "
-                "Invent a current case headline and a short sensational description for {interview.case_hint}."
+                "Invent a current sketchy headline and a short sensational description for {interview.case_hint}."
+                "Do not to use the word Case in the name. Keep it a simple title without extra phrases and colons."
+                "Remember this is a newspaper article _before_ any investigations happened; but give enough detail to pull the investigator in."
             ),
             schema=Schema(
                 name="CaseHeadline",
                 fields=[
-                    FieldSpec(name="name", type="str", required=True, description="Case headline."),
-                    FieldSpec(name="description", type="str", required=True, description="Case summary."),
+                    FieldSpec(name="name", type="str", required=True, description="Headline."),
+                    FieldSpec(name="description", type="str", required=True, description="Summary."),
                 ],
             ),
             description="Generate a short case article for the investigator.",
@@ -427,8 +429,11 @@ def build_initial_context() -> Context:
             "{interview.but_not_hint}"
             "*** End list of prior suggestions.\n"
             "Generate a dark personal secret for investigator "
-            "{investigator.name}, "
-            "who is investigating '{case.name}'."
+            "{investigator.name}, who is investigating '{case.name}'."
+            "However, the secret should be something mostly tangential to the case, something to do with the world outside the little eerie town of the investigation. "
+            "The secret should make the investigator vulnerable in some way ... a weakness or a guilt or an obsession. "
+            "But the secret should not be so severe that the investigator would not leave home, or have to deal with it immediately. "
+            "You are a Co-GM, so relate this secret in second person like you are reading it back. "
         ),
     )
     registry.register(personal_secret[0])
@@ -477,7 +482,8 @@ def build_initial_context() -> Context:
             "*** End list of prior suggestions.\n"
             "The investigator (a {investigator.archetype}) has an {interview.interest_hint} interest in this case. "
             "The current case is {case.name}. {case.description}. "
-            "Invent a reason they are personally invested."
+            "Invent a reason they are personally invested. It should concise and somewhat personal. "
+            "Use Second person, as if you are the Co-GM reading back their motives to them."
         ),
     )
     registry.register(interest[0])
@@ -493,7 +499,8 @@ def build_initial_context() -> Context:
                 "If the investigator has a skill advantage, symbolize this by suggesting a reference textbook."
                 "But don't ignore the possibility of weapons or crime scene investigation tools either."
                 "The investigator is a {investigator.archetype} on the case {case.name}. {case.description}. "
-                "The investigator remembers they possess {interview.advantage_hint}. "
+                "The investigator remembers they packed something needed for {interview.advantage_hint}. "
+                "You are a Co-GM, so use second person as if you are reading it back to the investigator. "
             ),
             schema=Schema(
                 name="Advantage",
@@ -564,11 +571,11 @@ def build_initial_context() -> Context:
                     "last_name_hint": ScalarNode(" a short middle name, last name ends with the letter R, but not just the letter "),
                     "suffix_hint": ScalarNode(" nothing "),
                     "name_guess1": ResolvableNode(*investigator_name, metadata=meta_data(1.0, "investigator_name")),
-                    "destination_hint": ScalarNode(" somewhere remote, town of 1000, the backstory does not involve a hum or crystals, people don't constantly become victims "),
+                    "destination_hint": ScalarNode(" somewhere remote, town of 1000, the backstory does not involve a hum or crystals or trapped townspeople or memory loss or replacement or mold, most of the townspeople are completely healthy and normal "),
                     "brochure1": ResolvableNode(*brochure, metadata=meta_data(4.0, "brochure")),
                     "date_hint": ScalarNode(" in the late 20th century "),
                     "newspaper": ResolvableNode(*newspaper_title),
-                    "case_hint": ScalarNode (" a strange case "),
+                    "case_hint": ScalarNode (" a strange case, but dismissed by outsiders "),
                     "case1": ResolvableNode(*case_headline),
                     "archetype_hint": ScalarNode(" investigator of the unknown and unknowable "),
                     "archetype1": ResolvableNode(
@@ -1194,6 +1201,7 @@ def handle_interview_choose_town(ctx: Context, ms: MachineState, cmd: Command) -
         _invalidate(ctx, 'interview', 'brochure1')
     if cmd.verb == Verb.CMD_CONFIRM:
         _confirm_and_freeze(ctx, ('interview', 'brochure1'), ('town',))
+        _set_not_hint(ctx, "Occult Gazette")
         return handle_interview_choose_newspaper(ctx, MachineState(Phase.INTERVIEW_CHOOSE_NEWSPAPER), cmd_noop)
     if cmd.verb == Verb.CMD_NOPE:
         _append_not_hint(ctx, query_town_short(ctx, 'interview', 'brochure1'))
@@ -1222,6 +1230,7 @@ def handle_interview_choose_newspaper(ctx: Context, ms: MachineState, cmd: Comma
         _invalidate(ctx, 'interview', 'newspaper')
     if cmd.verb == Verb.CMD_CONFIRM:
         _confirm_and_freeze(ctx, ('interview', 'newspaper'), ('newspaper',))
+        _set_not_hint(ctx, " about weaving ")
         return handle_interview_choose_case(ctx, MachineState(Phase.INTERVIEW_CHOOSE_CASE), cmd_noop)
     if cmd.verb == Verb.CMD_NOPE:
         _append_not_hint(ctx, query_newspaper(ctx))
@@ -1237,10 +1246,12 @@ def handle_interview_choose_case(ctx: Context, ms: MachineState, cmd: Command) -
     if cmd.verb == Verb.CMD_CHOICE and (cmd.ordinal == 1 or cmd.ordinal == 2):
         if cmd.arg.strip() == "":
             return handle_interview_choose_case(ctx, ms, cmd_noop)
-    prompt = (
-        "You can finally make out the paper now. A featured headline snaps your attention into focus. "
-        "This must be the case that pulled you all the way out here."
-    )
+    prompt = ""
+    if cmd.verb == Verb.CMD_NOOP:
+        prompt += "You pick up the newspaper, and turn to the first article. "
+    else:
+        prompt += "You turn to the next article. "
+    prompt += "Is this the case that convinced you to travel all the way out here to this eerie town? "
     if cmd.verb == Verb.CMD_CHOICE:
         if cmd.ordinal == 1:
             _set_not_hint(ctx, cmd.arg)
@@ -1264,8 +1275,8 @@ def handle_interview_choose_interest(ctx: Context, ms: MachineState, cmd: Comman
         if cmd.arg.strip() == "":
             return handle_interview_choose_interest(ctx, ms, cmd_noop)
     prompt = (
-        "Mable peers at you and waits. You can give the official reason for being here, "
-        "or admit the deeper reason you are personally invested."
+        "That brings up another question: "
+        "There was a deeper reason you are personally invested. What was it?"
     )
     if cmd.verb == Verb.CMD_CHOICE:
         if cmd.ordinal == 1:
@@ -1295,8 +1306,9 @@ def handle_interview_choose_secrets(ctx: Context, ms: MachineState, cmd: Command
             return handle_interview_choose_secrets(ctx, ms, cmd_noop)
 
     prompt = (
-        "You keep your face steady. Some truths are dangerous, but you cannot deny them to yourself forever. "
-        f"Choose a secret ({secret_count}/{target_secret_count} confirmed)."
+        "Oh. Right. And now that you recall more, you also remember some other things ... "
+        "Maybe a case of amnesia wasn't the worst thing that can happen to a person ... "
+        f"(You are choosing secrets. {secret_count}/{target_secret_count} choices confirmed)."
     )
 
     if cmd.verb == Verb.CMD_CHOICE:
@@ -1338,10 +1350,11 @@ def handle_interview_choose_advantages(ctx: Context, ms: MachineState, cmd: Comm
         if cmd.arg.strip() == "":
             return handle_interview_choose_advantages(ctx, ms, cmd_noop)
 
-    prompt = (
-        "You inventory your suitcase and your instincts. "
-        f"Pick an advantage ({advantage_count}/{target_advantage_count} confirmed)."
-    )
+    prompt = ""
+    if cmd.verb == Verb.CMD_NOOP:
+        prompt += "A fit of restlessness strikes you, and you nearly leap out of bed as you move to your suitcase and unpack a few things. "
+    prompt += "You _were_ trying to plan ahead it seems. You can almost see an inventory of your instincts and skill in what you packed. "
+    prompt += f"(You are choosing advantages. {advantage_count}/{target_advantage_count} choices confirmed). "
 
     if cmd.verb == Verb.CMD_CHOICE:
         if cmd.ordinal == 1:
