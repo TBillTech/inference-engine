@@ -289,6 +289,14 @@ def query_case(ctx: Context, *segments: str) -> str:
         f"Summary: {_query_resolved_field_text(ctx, *segments, field_name='description')}"
     )
 
+def query_advantage(ctx: Context, *segments: str) -> str:
+    advantage_description = (
+        f"Item: {_query_resolved_field_text(ctx, *segments, field_name="book_or_equipment")}\n"
+        f"Skill: {_query_resolved_field_text(ctx, *segments, field_name="implied_skill")}\n"
+        f"Advantage: {_query_resolved_field_text(ctx, *segments, field_name="advantage")}\n"
+    )
+    return advantage_description
+
 def meta_data(temp: float, name: str) -> dict[str, Any]:
     # Provider-level defaults still apply when max_tokens is omitted, so set
     # per-template budgets explicitly where longer structured outputs are expected.
@@ -490,24 +498,25 @@ def build_initial_context() -> Context:
 
     advantage = template_schema_tuple(
             template_str=(
-                "Describe an advantage that the investigator has, usually based on equipment they packed with them "
-                "when they left home to began this investigation. " 
+                "Describe either a book and a skill, or a piece of investigative equipment and a skill "
+                "that the investigator has, something that could fit in a suitcase. "
                 "The following is the list of prior suggestions you should avoid:\n"
                 "*** List of prior suggestions (if any):\n"
                 "{interview.but_not_hint}"
                 "*** End list of prior suggestions.\n"
-                "If the investigator has a skill advantage, symbolize this by suggesting a reference textbook."
-                "But don't ignore the possibility of weapons or crime scene investigation tools either."
                 "The investigator is a {investigator.archetype} on the case {case.name}. {case.description}. "
                 "The investigator remembers they packed something needed for {interview.advantage_hint}. "
                 "You are a Co-GM, so use second person as if you are reading it back to the investigator. "
+                "Describe the object, which is either a book or a an almost completely normal piece of equipment. "
+                "Then describe the skill or ability that goes along with it, and investigative expertise relating to the object. "
+                "Also describe what advantage this gives the investigator versus which kinds of activities with a few examples. "
             ),
             schema=Schema(
                 name="Advantage",
                 fields=[
-                    FieldSpec(name="advantage", type="str", required=True, description="A very brief description of the advantage."),
-                    FieldSpec(name="description", type="str", required=True, description="A description of the advantage."),
-                    FieldSpec(name="item", type="str", required=True, description="An objectified literal or symbolic representation of the advantage.")
+                    FieldSpec(name="book_or_equipment", type="str", required=True, description="Either the title of the book, or a ery brief description of the tool."),
+                    FieldSpec(name="implied_skill", type="str", required=True, description="The skill that is implied and utilizes the book or equipment."),
+                    FieldSpec(name="advantage", type="str", required=True, description="A description of the advantage this gives, and some simple examples."),
                 ],
             ),
             description="One of the investigator's advantages, possibly literal or psychological."
@@ -1230,7 +1239,7 @@ def handle_interview_choose_newspaper(ctx: Context, ms: MachineState, cmd: Comma
         _invalidate(ctx, 'interview', 'newspaper')
     if cmd.verb == Verb.CMD_CONFIRM:
         _confirm_and_freeze(ctx, ('interview', 'newspaper'), ('newspaper',))
-        _set_not_hint(ctx, " about weaving ")
+        _set_not_hint(ctx, " about weaving or humming ")
         return handle_interview_choose_case(ctx, MachineState(Phase.INTERVIEW_CHOOSE_CASE), cmd_noop)
     if cmd.verb == Verb.CMD_NOPE:
         _append_not_hint(ctx, query_newspaper(ctx))
@@ -1286,6 +1295,7 @@ def handle_interview_choose_interest(ctx: Context, ms: MachineState, cmd: Comman
         _invalidate(ctx, 'interview', 'interest1')
     if cmd.verb == Verb.CMD_CONFIRM:
         _confirm_and_freeze(ctx, ('interview', 'interest1'), ('investigator', 'interest'))
+        _set_not_hint(ctx, " a debt ")
         return handle_interview_choose_secrets(ctx, MachineState(Phase.INTERVIEW_CHOOSE_SECRETS), cmd_noop)
     if cmd.verb == Verb.CMD_NOPE:
         _append_not_hint(ctx, _query_resolved_field_text(ctx, 'interview', 'interest1', field_name='interest'))
@@ -1325,9 +1335,10 @@ def handle_interview_choose_secrets(ctx: Context, ms: MachineState, cmd: Command
             ('investigator', 'secrets'),
             ScalarNode(secret_text),
         )
-        _set_not_hint(ctx, "")
+        _append_not_hint(ctx, secret_text)
         _invalidate(ctx, 'interview', 'secret1')
         if secret_count >= target_secret_count:
+            _set_not_hint(ctx, "")
             return handle_interview_choose_advantages(ctx, MachineState(Phase.INTERVIEW_CHOOSE_ADVANTAGES), cmd_noop)
         return handle_interview_choose_secrets(ctx, ms, cmd_noop)
 
@@ -1369,9 +1380,10 @@ def handle_interview_choose_advantages(ctx: Context, ms: MachineState, cmd: Comm
     if cmd.verb == Verb.CMD_CONFIRM:
         node = ctx.query(Path('interview', 'advantage1'))
         advantage_count = _append_sequence_node(ctx, ('investigator', 'advantages'), node)
-        _set_not_hint(ctx, "")
+        _append_not_hint(ctx, query_advantage(ctx, 'interview', 'advantage1'))
         _invalidate(ctx, 'interview', 'advantage1')
         if advantage_count >= target_advantage_count:
+            _set_not_hint(ctx, "")
             return handle_game_over(ctx, MachineState(Phase.GAME_OVER), cmd_noop)
         return handle_interview_choose_advantages(ctx, ms, cmd_noop)
 
@@ -1382,7 +1394,7 @@ def handle_interview_choose_advantages(ctx: Context, ms: MachineState, cmd: Comm
     options = [Command(verb=Verb.CMD_CHOICE, ordinal=1, arg=f"I did not pack: {_get_not_hint(ctx)}")
               ,Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"I needed something for: {_scalar(ctx, 'interview', 'advantage_hint')}")
               ,Command(verb=Verb.CMD_CHOICE, ordinal=3, arg="I didn't bring anything else with me.")
-              ,Command(verb=Verb.CMD_CONFIRM, arg=f"{_query_text(ctx, 'interview', 'advantage1')}")
+              ,Command(verb=Verb.CMD_CONFIRM, arg=f"{query_advantage(ctx, 'interview', 'advantage1')}")
               ,Command(verb=Verb.CMD_NOPE, arg="No, I packed something else ...")]
     return Transition(next_phase=ms.phase, prompt=prompt, options=options)
         
