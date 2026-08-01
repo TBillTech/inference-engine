@@ -54,6 +54,8 @@ from context_resolver.inference.provider import (
 _DEFAULT_BASE_URL = "http://127.0.0.1:8080"
 _DEFAULT_MODEL = "local"
 _DEFAULT_MAX_TOKENS = 192
+_RETRY_MAX_TOKENS_FLOOR = 512
+_RETRY_MAX_TOKENS_MULTIPLIER = 2
 
 
 class LocalLlamaCppProvider(ResolutionProvider):
@@ -162,21 +164,25 @@ class LocalLlamaCppProvider(ResolutionProvider):
         url = f"{self._base_url}/v1/chat/completions"
         raw_response = self._post(url, payload)
 
-        choices = raw_response.get("choices") or []
-        if not choices:
-            raise RuntimeError(
-                "LocalLlamaCppProvider: server returned no choices in response."
-            )
-
-        content: str = (choices[0].get("message") or {}).get("content") or "{}"
-        reported_model: str = raw_response.get("model") or model
-
+        content, reported_model = self._extract_content_and_model(raw_response, model)
         try:
             data: dict[str, Any] = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"LocalLlamaCppProvider: response was not valid JSON: {content!r}"
-            ) from exc
+        except json.JSONDecodeError:
+            print("rethinking", flush=True)
+            retry_payload = dict(payload)
+            retry_payload["max_tokens"] = self._retry_max_tokens(payload.get("max_tokens"))
+            retry_response = self._post(url, retry_payload)
+            content, reported_model = self._extract_content_and_model(retry_response, model)
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError as exc:
+                print("rethinking", flush=True)
+                raise RuntimeError(
+                    "LocalLlamaCppProvider: response was not valid JSON after retry: "
+                    f"{content!r}"
+                ) from exc
+
+            raw_response = retry_response
 
         return ResolutionResult(
             data=data,
@@ -201,6 +207,35 @@ class LocalLlamaCppProvider(ResolutionProvider):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _extract_content_and_model(
+        self,
+        raw_response: dict[str, Any],
+        fallback_model: str,
+    ) -> tuple[str, str]:
+        """Extract assistant content and reported model from API response."""
+        choices = raw_response.get("choices") or []
+        if not choices:
+            raise RuntimeError(
+                "LocalLlamaCppProvider: server returned no choices in response."
+            )
+        content = (choices[0].get("message") or {}).get("content") or "{}"
+        reported_model = raw_response.get("model") or fallback_model
+        return content, reported_model
+
+    def _retry_max_tokens(self, current_max_tokens: Any) -> int:
+        """Compute a larger max_tokens budget for one retry."""
+        base = self._default_max_tokens
+        try:
+            if current_max_tokens is not None:
+                base = int(current_max_tokens)
+        except (TypeError, ValueError):
+            base = self._default_max_tokens
+
+        if base < 1:
+            base = self._default_max_tokens
+
+        return max(_RETRY_MAX_TOKENS_FLOOR, base * _RETRY_MAX_TOKENS_MULTIPLIER)
 
     def _post(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         """

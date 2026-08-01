@@ -365,6 +365,10 @@ def build_initial_context() -> Context:
                 "*** End list of prior suggestions.\n"
                 "Choose a location {interview.destination_hint}, and keep it isolated and hidden. "
                 "Invent a town name, an economic basis, and a dark backstory."
+                "However, the dark backstory should not be overtly supernatural. "
+                "The backstory should be something scandalous, yes, possibly even humans rights violations, "
+                "but it should be normal human corruption (which is bad and common enough). "
+                "We will layer on the supernatural investigation _later_. "
             ),
             schema=Schema(
                 name="TownBrochure",
@@ -413,9 +417,12 @@ def build_initial_context() -> Context:
                 "*** End list of prior suggestions.\n"
                 "The investigator archetype is {investigator.archetype}. "
                 "Town: {town.name}, location: {town.location}, economy: {town.economic}, backstory: {town.backstory}. "
-                "Invent a current sketchy headline and a short sensational description for {interview.case_hint}."
-                "Do not to use the word Case in the name. Keep it a simple title without extra phrases and colons."
-                "Remember this is a newspaper article _before_ any investigations happened; but give enough detail to pull the investigator in."
+                "Invent a current sketchy headline and a short sensational description for {interview.case_hint}. "
+                "This case _should_ at least lean toward the supernatural, and should use the town backstory as a canvas and background."
+                "Ideally the case exacerbates and somehow flows from the negative energy of the backstory as the seed where the eerie breaks into our world "
+                "through the weakening and decay of human virtues. "
+                "Do not to use the word Case in the name. Keep it a simple title without extra phrases and colons. "
+                "Remember this is a newspaper article _before_ any investigations happened; but give enough detail to pull the investigator in. "
             ),
             schema=Schema(
                 name="CaseHeadline",
@@ -960,30 +967,34 @@ def print_action(ctx: Context) -> None:
 # Game State Machine
 # ---------------------------------------------------------------------------
 
-# "The interview is the part of the game where the program 'extracts' the details of the situation from "
-# "the player, basically a kind of interview based character creation process."
-# "It follows these steps:"
-# "1) The Player is welcomed to the game, and the Player 'wakes up' and is asked 'do you remember your name?'"
-# "2) Archetype: The player is expected to then choose from one of 8 archetypes 'Oh yeah, I am a __, I remember that much!'"
-# "2.5) OR the player could pick the option: 'No those aren't right ... <provide archetype_hint> and try to remember the truth!'"
-# "3) Player Names: The Player is shown a list of names 1 to 4 and selects 'Oh, I think my name is __ __' "
-# "3.5) OR the player could pick the option: 'No those aren't right ... friends I remember maybe? <provide name hints> and concentrate!'"
-# "4) The player is welcomed by name, and is asked 'what do you remember?' and shown a brochure with 4 choices."
-# "5) Town: The player is expected to answer with number 1 to 4 'Oh yeah, __ was where I was headed, I remember now!'"
-# "5.5) OR the player could pick the option: 'None of those sound right ... <provide destination hint> and turn the page.' and go back to step 2)"
-# "6) Newspaper Title: The player is expected to confirm the newspaper title."
-# "6.5) OR the player says 'No, that's can't be.  My eyes are still fuzzy though, maybe I read it wrong. The day should be <provide date_hint>'"
-# "7) Case: The player is expected to answer with number 1 to 4 'I\'m investigating the case of _'"
-# "7.5) OR the player could pick the option: 'None of these ring a bell ... <provide case_hint> and turn to the next newspaper page.'"
-# "8) Interest: The player is expected to answer with number 1 to 4 'I\'m not ready to tell Mable this, but my real reason for being here is __'"
-# "8.5) OR the player could pick the option: 'Maybe somebody would expect something like that but they don't know my interest is <provide interest_hint>'"
-# "9) Secrets: The player is expected to answer with number 1 to 4 'I\'ll never willingly tell a soul, but _.'"
-# "9.5) OR the player could pick the option: 'Ha! My real secret is more <provide secret_hint>.'"
-# "10) Then, until enough secrets are rolled, repeat step 9."
-# "11) Advantages: The player is expected to answer with number 1 to 4 'I packed the __ because __.'"
-# "11.5) OR the player could pick the option: 'No I felt I needed something for <suitcase_hint>.' and regenerate."
-# "11.6) OR the player could pick the option: 'I didn't bring anything else with me.'"
-# "12) Then, until up to 3 advantages have been rolled, repeat step 11."
+# In the interview process, each choice is made via hints and Yes or No choices.
+# The user can type a number and replace the hint
+# The user can input Yes, to confirm the current choice.
+# The user can input No, to regenerate the current choice (and append not that to the but_not_hint).
+
+# The interview is the part of the game where the program 'extracts' the details of the situation from 
+# the player, basically a kind of interview based character creation process.
+# It follows these steps:
+# 1) The Player is welcomed to the game, and the Player 'wakes up' and is asked 'do you remember your name?'
+# 2) Archetype choice
+# 3) Player Name choice
+# 4) Town (brochure) choice
+# 5) Newspaper Title choice
+# 6) Case choice
+# 7) Interest in the case choice
+# 9) Secrets choice
+# 10) Then, until enough secrets are rolled, repeat step 9.
+# 11) Advantages choice
+# 12) Then, until up to 3 advantages have been rolled, repeat step 11.
+
+# After the interview, the following initializations mut be completed:
+# * Set instability to number of secrets
+# * run attributes query, and assign attributes
+# * print grand summary of state of play afer interview
+
+# Notebook Initialization
+# * Add grand summary to daybook
+# * Add summary of summary to diary
 
 class Phase(Enum):
     GAME_BEGIN = auto()
