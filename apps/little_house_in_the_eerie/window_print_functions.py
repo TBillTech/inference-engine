@@ -24,7 +24,10 @@ def get_notebook_diary(ctx: Context, idx: int = -1) -> str:
 
 def get_notebook_daybook(ctx: Context) -> str:
     """Investigator day book."""
-    day_book = ctx.query_text(ctx, "notebook", "daybook")
+    day_book = ""
+    daybook_node = ctx.query(Path("notebook", "daybook"))
+    for i, blurb in enumerate(daybook_node, 1):
+        day_book += f"{fmt(blurb)}\n"
     return day_book
 
 def get_notebook_log(ctx: Context, idx: int = -1) -> str:

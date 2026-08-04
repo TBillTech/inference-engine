@@ -258,26 +258,37 @@ def run_repl(ctx: Context) -> None:
             print()
 
         elif cmd.verb == Verb.CMD_LOOK:
-            target = cmd.arg
-            if target == "notebook":
-                print_notebook(ctx)
-            elif target == "status":
-                print_status(ctx)
-            elif target == "atmosphere":
-                print_atmosphere(ctx)
-            elif target == "scene":
-                print_scene(ctx)
-            elif target == "event":
-                print_event(ctx)
-            elif target == "action":
-                pass
-            else:
+            target = cmd.arg.split()
+            print_str = None
+            if target[0] == "diary":
+                print_str = get_notebook_diary(ctx, int(target[1]) if len(target) > 1 else -1)
+            elif target[0] == "daybook":
+                print_str = get_notebook_daybook(ctx)
+            elif target[0] == "daybook":
+                print_str = get_notebook_log(ctx, int(target[1]) if len(target) > 1 else -1)
+            elif target[0] == "clues":
+                print_str = get_notebook_clue_summary(ctx)
+            elif target[0] == "case":
+                print_str = get_notebook_case_summary(ctx)
+            elif target[0] == "investigator":
+                print_str = get_notebook_investigator_summary(ctx)
+            elif target[0] == "secrets":
+                print_str = get_notebook_secrets_summary(ctx)
+            elif target[0] == "town":
+                print_str = get_notebook_town_summary(ctx)
+            elif target[0] == "location":
+                print_str = get_notebook_location_summary(ctx, target[1])
+            elif target[0] == "scene":
+                print_str = get_notebook_scene_summary(ctx)
+            if print_str == None:
                 print(
                     format_prompt(
                         f"Unknown target '{target}'. Try: notebook, status, atmosphere, scene, event, action\n",
                         usable_width,
                     )
                 )
+            else:
+                print(format_prompt(print_str+"\n", usable_width))
 
         elif cmd.verb in (Verb.QUESTION, Verb.QUESTION_IS):
             answer = random.choice(_ORACLE_ANSWERS)

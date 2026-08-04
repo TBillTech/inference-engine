@@ -189,7 +189,7 @@ def post_interview_initialization(ctx: Context) -> None:
     archetype = query_text(ctx, "investigator", "archetype")
     case_name = scalar(ctx, "case", "name")
     case_summary = scalar(ctx, "case", "description")
-    interest = query_text(ctx, "investigator", "interest")
+    interest = query_text(ctx, "investigator", "interest", "interest")
     advantages = sequence_len(ctx, "investigator", "advantages")
     atmosphere_date = query_text(ctx, "atmosphere", "date")
     daybook_info = (
@@ -197,11 +197,11 @@ def post_interview_initialization(ctx: Context) -> None:
         f"Day: {atmosphere_date}\n"
     )
     summary = (
-        f"I have recovered my memory. I was in an accident where the bridge to the Bed & Breakfast collapsed while I was trying to cross it. "
+        f"I have recovered my memory. I was in an accident where the bridge to the bed and breakfast collapsed while I was trying to cross it. "
         f"Mable has helped me recover my memory by gently asking questions ... but there is something suspicious about her attitude. "
-        f"At any rate, I have arrived in {query_town_short(ctx)} to pursue '{case_name}'. "
-        f"Case summary: {case_summary}. "
-        f"Personal stake: {interest}. "
+        f"At any rate, I have arrived in {query_town_short(ctx)}\n"
+        f"I am here to pursue my next case: {case_name}. {case_summary}.\n"
+        f"I have a personal stake in this case: {interest}. "
     )
     set_keyed_node(ctx, ScalarNode(summary), "notebook", "diary_raw")
     diary_summary = query_text(ctx, "notebook", "diary_entry")
