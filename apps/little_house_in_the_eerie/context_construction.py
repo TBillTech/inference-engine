@@ -143,12 +143,14 @@ def build_initial_context() -> Context:
             "*** End list of prior suggestions.\n"
             "Generate a dark personal secret for investigator "
             "{investigator.name}, who is investigating '{case.name}'."
-            "The secret should NOT be something directly related to the case"
+            "The secret should NOT be something directly related to the case. "
             "The secret should be something to do with the world outside and to do with being a {investigator.archetype}. "
-            "The secret should be something personal, that, through no fault of your own, led to a betrayal or a murder or a decline into addiction or madness. "
-            "The secret should be something law enforcement would investigate, or the investigators closest friends would be scandalized to learn. "
+            "The secret should be something personal, that, through no fault of my own, led to a misunderstanding or even a sad ending. "
+            "The secret should be something that would set my career back, or the my closest friends would be scandalized to learn it. "
+            "The secret should be something that I probably could not have avoided, but haunts me anyway. "
             "But the secret should be something that if kept secret will not cause any obvious problems. "
-            "You are a Co-GM, so you should relate this secret in first person like done in a diary. "
+            "Also, keep the secret concise ... don't describe downstream consequences. The brute facts are enough to haunt me. "
+            "Report this as if you are the one describing your own secret in first person. "
         ),
     )
     registry.register(personal_secret[0])
@@ -196,9 +198,9 @@ def build_initial_context() -> Context:
             "{interview.but_not_hint}"
             "*** End list of prior suggestions.\n"
             "The investigator (a {investigator.archetype}) has an {interview.interest_hint} interest in this case. "
-            "The current case is {case.name}. {case.description}. "
-            "Invent a reason they are personally invested. It should concise and somewhat personal. "
-            "Use First person, as if you are the Co-GM reading back their diary to them."
+            "The current case is {case.name}. {case.description} "
+            "Invent a reason the investigator is personally invested. It should concise and somewhat personal. "
+            "Use First person, as if you are the one who cares about this case. "
         ),
     )
     registry.register(interest[0])
@@ -211,12 +213,12 @@ def build_initial_context() -> Context:
             "*** List of prior suggestions (if any):\n"
             "{interview.but_not_hint}"
             "*** End list of prior suggestions.\n"
-            "The investigator is a {investigator.archetype} on the case {case.name}. {case.description}. "
-            "The investigator remembers they packed something needed for {interview.advantage_hint}. "
-            "You are a Co-GM, so use first person as if you are reading the investigators diary. "
-            "Describe the object, which is either a book or a an almost completely normal piece of equipment. "
+            "You are an investigator, a {investigator.archetype}, on the case {case.name}. {case.description}. "
+            "You remember you packed something you needed for {interview.advantage_hint}. "
+            "Use first person as if you are the one describing your own book or object. "
+            "Describe the object, which is either a book or an object as an almost completely normal piece of equipment. "
             "Then describe the skill or ability that goes along with it, and investigative expertise relating to the object. "
-            "Also describe what advantage this gives the investigator versus which kinds of activities with one simple example. "
+            "Also describe what advantage this gives the you versus which kinds of activities with one simple example. "
         ),
         schema=Schema(
             name="Advantage",
@@ -276,6 +278,7 @@ def build_initial_context() -> Context:
         "date",
         "What is the exact next day after {atmosphere.prior_date}. Be sure to increment the month and decrement to 1 of the month if necessary.",
     )
+    registry.register(date_generator[0])
 
     diary_generator = simple_schema(
         "Diary Brief",
@@ -284,10 +287,11 @@ def build_initial_context() -> Context:
             "Summarize the following personal log below in first person as a short diary entry. "
             "Try to be detail oriented, but not exhaustive, this should be a summary not a complete retelling. "
             "Feel free to add emotional color where natural. "
-            "Preface the entry with the date: {atomosphere.prior_date}, and the time (hour: {atmosphere.hour_of_day}, minute: {atmosphere.minute_of_hour}, is pm? {atmosphere.post_meridian}). "
+            "Preface the entry with the date: {atmosphere.prior_date}, and the time (hour: {atmosphere.hour_of_day}, minute: {atmosphere.minute_of_day}, is pm? {atmosphere.post_meridian}). "
             "Here is the log: \n{notebook.diary_raw}"
         ),
     )
+    registry.register(diary_generator[0])
 
     case_summary = simple_schema(
         "Case Summary",
@@ -300,8 +304,10 @@ def build_initial_context() -> Context:
             "Preface the entry with the case name: {case.name}, on date {case.date}. "
             "The case description is: {case.description}. "
             "The clues related to the case are: {notebook.clues}. "
+            "Describe the case like you are the one who found the clues. "
         )
     )
+    registry.register(case_summary[0])
 
     investigator_summary = simple_schema(
         "Investigator Summary",
@@ -324,16 +330,18 @@ def build_initial_context() -> Context:
             "Iterest: {investigator.interest}\n"
         )
     )
+    registry.register(investigator_summary[0])
 
     secrets_summary = simple_schema(
         "Investigator Secrets",
         "investigator_secrets",
         (
             "Clean up and summaries the following investigator secrets. "
-            "This is a kind of forbidden diary. Use first person like in a diary.\n"
+            "This is a kind of forbidden diary. Use first person like they are your secrets.\n"
             "Secrets: {investigator.secrets}\n"
         )
     )
+    registry.register(secrets_summary[0])
 
     location_summary = simple_schema(
         "Location Summary",
@@ -343,6 +351,7 @@ def build_initial_context() -> Context:
             "{print_summaries.location_data}"
         )
     )
+    registry.register(location_summary[0])
 
     town_summary = simple_schema(
         "Town Summary",
@@ -352,6 +361,7 @@ def build_initial_context() -> Context:
             "{print_summaries.town_data}"
         )
     )
+    registry.register(town_summary[0])
 
     npc_list = simple_schema(
         "NPC List",
@@ -361,6 +371,7 @@ def build_initial_context() -> Context:
             "{npcs}"
         )
     )
+    registry.register(npc_list[0])
 
     npc = simple_schema(
         "NPC Summary",
@@ -371,6 +382,7 @@ def build_initial_context() -> Context:
             "Description: {print_summaries.npc_data}"
         )
     )
+    registry.register(npc[0])
 
     scene_description = simple_schema(
         "Scene Description",
@@ -383,6 +395,7 @@ def build_initial_context() -> Context:
             "Scene details: {scene.elements}\n"
         )
     )
+    registry.register(scene_description[0])
 
     root = MappingNode(
         {
@@ -404,7 +417,7 @@ def build_initial_context() -> Context:
                     "archetype1": ResolvableNode(*investigator_archetype, metadata=meta_data(1.0, "investigator_arch")),
                     "interest_hint": ScalarNode(" it reminds me of something my colleague once reported ... "),
                     "interest1": ResolvableNode(*interest, metadata=meta_data(4.0, "interest")),
-                    "secrets_hint": ScalarNode(" failed insvestigations "),  # " dark "
+                    "secrets_hint": ScalarNode(" My fakeness could come out. I tried to be reliable but failed. "),  # " dark "
                     "secret1": ResolvableNode(*personal_secret),
                     "advantage_hint": ScalarNode(" a useful item "),
                     "advantage1": ResolvableNode(*advantage),

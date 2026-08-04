@@ -20,6 +20,8 @@ import shutil
 import textwrap
 from pathlib import Path as FilePath
 
+from context_resolver.ast.nodes import MappingNode, SequenceNode
+from context_resolver.ast.resolvable_node import ResolvableNode
 from context_resolver.context.context import Context
 
 from apps.little_house_in_the_eerie.context_construction import build_initial_context
@@ -106,6 +108,35 @@ def _save_game(ctx: Context, phase: Phase, slot: str) -> FilePath:
     return save_path
 
 
+def _refresh_resolvable_bindings(ctx: Context) -> None:
+    """Re-infer bindings/dependencies from current templates after load."""
+    stack = [ctx.root]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, MappingNode):
+            stack.extend(child for _, child in node.items())
+            continue
+        if isinstance(node, SequenceNode):
+            stack.extend(node)
+            continue
+        if isinstance(node, ResolvableNode):
+            old_bindings = node.input_bindings
+            old_dependencies = node.dependencies
+            old_configured = node._configured
+            node.input_bindings = {}
+            node.dependencies = []
+            node._configured = False
+            try:
+                node.configure(ctx)
+            except ValueError:
+                # If a template is not in the current registry, keep loaded bindings.
+                node.input_bindings = old_bindings
+                node.dependencies = old_dependencies
+                node._configured = old_configured
+            if node.result is not None:
+                stack.append(node.result)
+
+
 def _load_game(slot: str) -> tuple[Context, Phase]:
     load_path = _save_path(slot)
     with load_path.open("rb") as handle:
@@ -113,6 +144,7 @@ def _load_game(slot: str) -> tuple[Context, Phase]:
 
     fresh_context = build_initial_context()
     loaded_context = Context.from_dict(payload["context"], resolver=fresh_context.resolver)
+    _refresh_resolvable_bindings(loaded_context)
     phase_name = payload.get("phase", Phase.GAME_BEGIN.name)
     phase = Phase[phase_name]
     return loaded_context, phase

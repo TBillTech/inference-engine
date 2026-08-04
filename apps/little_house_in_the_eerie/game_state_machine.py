@@ -395,7 +395,7 @@ def handle_interview_choose_newspaper(ctx: Context, ms: MachineState, cmd: Comma
         invalidate(ctx, "interview", "newspaper")
     if cmd.verb == Verb.CMD_CONFIRM:
         confirm_and_freeze(ctx, ("interview", "newspaper"), ("newspaper",))
-        set_not_hint(ctx, " about weaving or humming ")
+        set_not_hint(ctx, " about petrification or humming ")
         return Transition(Phase.INTERVIEW_CHOOSE_CASE)
     if cmd.verb == Verb.CMD_NOPE:
         append_not_hint(ctx, query_newspaper(ctx))
