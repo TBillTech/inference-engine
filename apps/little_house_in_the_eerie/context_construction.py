@@ -143,11 +143,12 @@ def build_initial_context() -> Context:
             "*** End list of prior suggestions.\n"
             "Generate a dark personal secret for investigator "
             "{investigator.name}, who is investigating '{case.name}'."
-            "The secret should be something tangential to the case; something to do with the world outside. "
-            "The secret should be something personal, like a betrayal a murder or something that led an acquantenaces to decline into addiction or madness. "
-            "The secret should be something law enforcement would invetigate, or the investigator's enemies could use, or the investigators closest friends would be scandalized. "
+            "The secret should NOT be something directly related to the case"
+            "The secret should be something to do with the world outside and to do with being a {investigator.archetype}. "
+            "The secret should be something personal, that, through no fault of your own, led to a betrayal or a murder or a decline into addiction or madness. "
+            "The secret should be something law enforcement would investigate, or the investigators closest friends would be scandalized to learn. "
             "But the secret should be something that if kept secret will not cause any obvious problems. "
-            "You are a Co-GM, so relate this secret in second person like you are reading it back. "
+            "You are a Co-GM, so you should relate this secret in first person like done in a diary. "
         ),
     )
     registry.register(personal_secret[0])
@@ -197,7 +198,7 @@ def build_initial_context() -> Context:
             "The investigator (a {investigator.archetype}) has an {interview.interest_hint} interest in this case. "
             "The current case is {case.name}. {case.description}. "
             "Invent a reason they are personally invested. It should concise and somewhat personal. "
-            "Use Second person, as if you are the Co-GM reading back their motives to them."
+            "Use First person, as if you are the Co-GM reading back their diary to them."
         ),
     )
     registry.register(interest[0])
@@ -212,7 +213,7 @@ def build_initial_context() -> Context:
             "*** End list of prior suggestions.\n"
             "The investigator is a {investigator.archetype} on the case {case.name}. {case.description}. "
             "The investigator remembers they packed something needed for {interview.advantage_hint}. "
-            "You are a Co-GM, so use second person as if you are reading it back to the investigator. "
+            "You are a Co-GM, so use first person as if you are reading the investigators diary. "
             "Describe the object, which is either a book or a an almost completely normal piece of equipment. "
             "Then describe the skill or ability that goes along with it, and investigative expertise relating to the object. "
             "Also describe what advantage this gives the investigator versus which kinds of activities with one simple example. "
@@ -276,6 +277,113 @@ def build_initial_context() -> Context:
         "What is the exact next day after {atmosphere.prior_date}. Be sure to increment the month and decrement to 1 of the month if necessary.",
     )
 
+    diary_generator = simple_schema(
+        "Diary Brief",
+        "entry",
+        (
+            "Summarize the following personal log below in first person as a short diary entry. "
+            "Try to be detail oriented, but not exhaustive, this should be a summary not a complete retelling. "
+            "Feel free to add emotional color where natural. "
+            "Preface the entry with the date: {atomosphere.prior_date}, and the time (hour: {atmosphere.hour_of_day}, minute: {atmosphere.minute_of_hour}, is pm? {atmosphere.post_meridian}). "
+            "Here is the log: \n{notebook.diary_raw}"
+        ),
+    )
+
+    case_summary = simple_schema(
+        "Case Summary",
+        "case_so_far",
+        (
+            "Summarize the following case details in a coherent first person description (like a report to a superior). "
+            "Feel free to merge or harmonize clues that seem related. "
+            "Try to be detail oriented, but not exhaustive, this should be a story not a set of bullet points. "
+            "Feel free to add obvious interpretive connections. "
+            "Preface the entry with the case name: {case.name}, on date {case.date}. "
+            "The case description is: {case.description}. "
+            "The clues related to the case are: {notebook.clues}. "
+        )
+    )
+
+    investigator_summary = simple_schema(
+        "Investigator Summary",
+        "investigator_stats",
+        (
+            "Clean up and orient the following investigator details in a summary. "
+            "If you see empty or schematic fields, represent it minimally (Like if disadvantages is an empty list). "
+            "For wounds, 0 means healthy, 1 means bad wound, 2 means severe wound, 3 means dying. "
+            "For instability, 0 means completely stable, 6 means game-over insane. "
+            "For luck, 0 means no luck at all, 6 means normal luck. "
+            "This is a kind of character sheet.\n"
+            "Name: {investigator.name}\n"
+            "Job: {investigator.archetype}\n"
+            "Attributes: {investigator.attributes}\n"
+            "Wounds: {investigator.wounds}\n"
+            "Instability: {investigator.instability}\n"
+            "Luck: {investigator.luck}\n"
+            "Advantages: {investigator.advantages}\n"
+            "Disadvantages: {investigator.disadvantages}\n"
+            "Iterest: {investigator.interest}\n"
+        )
+    )
+
+    secrets_summary = simple_schema(
+        "Investigator Secrets",
+        "investigator_secrets",
+        (
+            "Clean up and summaries the following investigator secrets. "
+            "This is a kind of forbidden diary. Use first person like in a diary.\n"
+            "Secrets: {investigator.secrets}\n"
+        )
+    )
+
+    location_summary = simple_schema(
+        "Location Summary",
+        'location_summary',
+        (
+            "Clean up and prose format the following location name and description.\n"
+            "{print_summaries.location_data}"
+        )
+    )
+
+    town_summary = simple_schema(
+        "Town Summary",
+        "summary",
+        (
+            "Clean up and prose format the following town name and description.\n"
+            "{print_summaries.town_data}"
+        )
+    )
+
+    npc_list = simple_schema(
+        "NPC List",
+        "summary",
+        (
+            "List the names of the NPCs in the current game state.\n"
+            "{npcs}"
+        )
+    )
+
+    npc = simple_schema(
+        "NPC Summary",
+        "summary",
+        (
+            "Clean up and prose format the following NPC name and description.\n"
+            "Name: {print_summaries.npc_name}\n"
+            "Description: {print_summaries.npc_data}"
+        )
+    )
+
+    scene_description = simple_schema(
+        "Scene Description",
+        'scene_description',
+        (
+            "Collect and describe the following scene, combining the details as logically as possible.\n"
+            "Location: {scene.location}\n"
+            "Overall description: {scene.specifics}\n"
+            "Scene vibe: {print_summaries.vibe_summary}\n"
+            "Scene details: {scene.elements}\n"
+        )
+    )
+
     root = MappingNode(
         {
             "interview": MappingNode(
@@ -292,11 +400,11 @@ def build_initial_context() -> Context:
                     "newspaper": ResolvableNode(*newspaper_title),
                     "case_hint": ScalarNode(" an inexplicable death "),
                     "case1": ResolvableNode(*case_headline),
-                    "archetype_hint": ScalarNode(" investigator of the unknown and unknowable "),
+                    "archetype_hint": ScalarNode(" federal investigator, SCP division "), # " investigator of the unknown and unknowable "
                     "archetype1": ResolvableNode(*investigator_archetype, metadata=meta_data(1.0, "investigator_arch")),
-                    "interest_hint": ScalarNode(" keen "),
-                    "interest1": ResolvableNode(*interest, metadata=meta_data(1.0, "interest")),
-                    "secrets_hint": ScalarNode(" dark "),
+                    "interest_hint": ScalarNode(" it reminds me of something my colleague once reported ... "),
+                    "interest1": ResolvableNode(*interest, metadata=meta_data(4.0, "interest")),
+                    "secrets_hint": ScalarNode(" failed insvestigations "),  # " dark "
                     "secret1": ResolvableNode(*personal_secret),
                     "advantage_hint": ScalarNode(" a useful item "),
                     "advantage1": ResolvableNode(*advantage),
@@ -341,9 +449,13 @@ def build_initial_context() -> Context:
             ),
             "notebook": MappingNode(
                 {
-                    "logbook": SequenceNode([]),
-                    "daybook": SequenceNode([]),
-                    "diary": SequenceNode([]),
+                    "logbook_dates": SequenceNode([]), # A matching list of the date for each logbook
+                    "logbook": SequenceNode([]), # concatenation of the daybooks
+                    "daybook": SequenceNode([]), # Summaries, clues, and questions
+                    "diary_raw": ScalarNode(""), # Raw text for generating a diary entry
+                    "diary_entry": ResolvableNode(*diary_generator),
+                    "diary_dates": SequenceNode([]), # A matching list of the date for each summary
+                    "diary": SequenceNode([]), # A list of summaries of the daybook
                     "clues": SequenceNode([]),
                 }
             ),
@@ -399,7 +511,6 @@ def build_initial_context() -> Context:
                     "date": ResolvableNode(*date_generator),
                     "weather_changing": ScalarNode("Not changing"),
                     "prior_weather": ScalarNode("Sunny"),
-                    "vibe": ResolvableNode(*vibe),
                     "time_limit": ScalarNode(6),
                 }
             ),
@@ -423,9 +534,11 @@ def build_initial_context() -> Context:
                         ]
                     ),
                     "npcs": SequenceNode(["Mable Jenner"]),
-                    "description": ResolvableNode(*scene_description),
+                    "npcs_data": SequenceNode("")
                 }
             ),
+            # This "event" node is not directly "lookable" by the player.  
+            # It is used to track progress through the scene and phase details
             "event": MappingNode(
                 {
                     "description": ScalarNode("Investigation Progress"),
@@ -434,17 +547,21 @@ def build_initial_context() -> Context:
                     "escalation": ScalarNode(1),
                 }
             ),
-            "action": MappingNode(
+            "print_summaries": MappingNode(
                 {
-                    "available": SequenceNode(
-                        [
-                            "Approach the front door cautiously",
-                            "Observe the shadowy figure from a distance",
-                            "Check the perimeter of the house",
-                            "Call out to the figure in the window",
-                        ]
-                    ),
-                    "chosen": ScalarNode(None),
+                    "case_summary": ResolvableNode(*case_summary),
+                    "investigator_summary": ResolvableNode(*investigator_summary),
+                    "secrets_summary": ResolvableNode(*secrets_summary),
+                    "town_data": PLACE_HOLDER,
+                    "town_summary": ResolvableNode(*town_summary),
+                    "location_data": PLACE_HOLDER,
+                    "location_summary": ResolvableNode(*location_summary),
+                    "scene_summary": ResolvableNode(*scene_description),
+                    "vibe_summary": ResolvableNode(*vibe),
+                    "all_npcs": ResolvableNode(*npc_list),
+                    "npc_name": PLACE_HOLDER,
+                    "npc_data": PLACE_HOLDER,
+                    "npc_summary": ResolvableNode(*npc),
                 }
             ),
         }

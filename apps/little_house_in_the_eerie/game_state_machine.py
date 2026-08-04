@@ -45,6 +45,8 @@ class Phase(Enum):
 class Verb(Enum):
     CMD_NOOP = auto()
     CMD_QUIT = auto()
+    CMD_SAVE = auto()
+    CMD_LOAD = auto()
     CMD_CHOICE = auto()
     CMD_NOPE = auto()
     CMD_CONFIRM = auto()
@@ -97,6 +99,10 @@ PhaseTransitionHandler = Callable[[Context, Phase], None]
 def to_verb(tokens: list[str]) -> Verb:
     if tokens[0].upper() in ("QUIT", "EXIT"):
         return Verb.CMD_QUIT
+    if tokens[0].upper() == "SAVE":
+        return Verb.CMD_SAVE
+    if tokens[0].upper() == "LOAD":
+        return Verb.CMD_LOAD
     if tokens[0].isnumeric():
         return Verb.CMD_CHOICE
     if tokens[0].upper() in ("N", "NO", "NOPE"):
@@ -186,18 +192,21 @@ def post_interview_initialization(ctx: Context) -> None:
     interest = query_text(ctx, "investigator", "interest")
     advantages = sequence_len(ctx, "investigator", "advantages")
     atmosphere_date = query_text(ctx, "atmosphere", "date")
+    daybook_info = (
+        f"{name}'s {archetype} Investigative Journal\n"
+        f"Day: {atmosphere_date}\n"
+    )
     summary = (
-        f"On {atmosphere_date}, you recovered your memory as {name} ({archetype}). "
-        f"You arrived in {query_town_short(ctx)} to pursue '{case_name}'. "
+        f"I have recovered my memory. I was in an accident where the bridge to the Bed & Breakfast collapsed while I was trying to cross it. "
+        f"Mable has helped me recover my memory by gently asking questions ... but there is something suspicious about her attitude. "
+        f"At any rate, I have arrived in {query_town_short(ctx)} to pursue '{case_name}'. "
         f"Case summary: {case_summary}. "
         f"Personal stake: {interest}. "
-        f"You carry {advantages} advantages and {secret_count} destabilizing secrets."
     )
-    diary_summary = (
-        f"You remembered why you came: '{case_name}'. "
-        f"The burden of {secret_count} secrets is already shaping your choices."
-    )
+    set_keyed_node(ctx, ScalarNode(summary), "notebook", "diary_raw")
+    diary_summary = query_text(ctx, "notebook", "diary_entry")
 
+    append_sequence_node(ctx, ("notebook", "daybook"), ScalarNode(daybook_info))
     append_sequence_node(ctx, ("notebook", "daybook"), ScalarNode(summary))
     append_sequence_node(ctx, ("notebook", "diary"), ScalarNode(diary_summary))
 
