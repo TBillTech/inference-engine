@@ -26,7 +26,7 @@ from enum import Enum, auto
 from typing import Any
 
 from context_resolver.ast.nodes import Node, NodeState
-from context_resolver.ast.paths import Path
+from context_resolver.ast.paths import Path, PathSegment
 from context_resolver.ast.schema import Schema, FieldSpec
 from context_resolver.templates.template import Template
 
@@ -203,6 +203,24 @@ class ResolvableNode(Node):
             return self._match_schema_path(field_spec.type, tail)
 
         return False
+
+    def _query_text(
+        self,
+        context: Any,
+        current_path: Path,
+        segments: tuple[PathSegment, ...],
+    ) -> str:
+        resolved = context.query(current_path)
+        if isinstance(resolved, ResolvableNode):
+            if resolved.result is None:
+                return resolved._query_text_value()
+            return resolved.result._query_text(context, current_path, segments)
+        return resolved._query_text(context, current_path, segments)
+
+    def _query_text_value(self) -> str:
+        if self._resolution_state is ResolvableNodeState.RESOLVED and self._result is not None:
+            return self._result._query_text_value()
+        return f"PromptNode({self._resolution_state.name})"
 
     # ------------------------------------------------------------------
     # ResolvableNode state

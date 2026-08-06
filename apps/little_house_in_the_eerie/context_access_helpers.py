@@ -29,27 +29,6 @@ def fmt(node: Any) -> str:
     return repr(node)
 
 
-def query_text(ctx: Context, *segments: str) -> str:
-    """
-    Query *path* (triggering lazy inference if needed) and return readable text.
-
-    For a resolved ResolvableNode whose result is a MappingNode, the first scalar
-    field is returned. For ScalarNode values, the scalar value is returned.
-    """
-    path = Path(*segments)
-    node = ctx.query(path)
-    if isinstance(node, ResolvableNode) and node.result is not None:
-        result = node.result
-        if isinstance(result, MappingNode):
-            for _, child in result.items():
-                if isinstance(child, ScalarNode) and child.value is not None:
-                    return str(child.value)
-        return fmt(result)
-    if isinstance(node, ScalarNode):
-        return str(node.value) if node.value is not None else "<unspecified>"
-    return fmt(node)
-
-
 def scalar(ctx: Context, *segments: str) -> Any:
     """Query a ScalarNode and return its raw Python value."""
     node = ctx.query(Path(*segments))
@@ -85,7 +64,7 @@ def set_not_hint(ctx: Context, not_hint: str) -> None:
 
 
 def get_not_hint(ctx: Context) -> str:
-    return query_text(ctx, "interview", "but_not_hint")
+    return ctx.query_text("interview", "but_not_hint")
 
 
 def append_not_hint(ctx: Context, not_hint: str) -> None:
@@ -131,37 +110,25 @@ class NameMode(Enum):
     FULL = auto()
 
 
-def query_resolved_field_text(ctx: Context, *segments: str, field_name: str) -> str:
-    """Query a resolved mapping node and return one named scalar field as text."""
-    node = ctx.query(Path(*segments))
-    if isinstance(node, ResolvableNode) and node.result is not None:
-        node = node.result
-    if isinstance(node, MappingNode):
-        child = node.get(field_name)
-        if isinstance(child, ScalarNode) and child.value is not None:
-            return str(child.value)
-    return fmt(node)
-
-
 def query_investigator_name(ctx: Context, mode: NameMode, *segments: str) -> str:
     if len(segments) == 0:
         segments = ("investigator", "name")
     if mode == NameMode.FIRST:
-        return query_resolved_field_text(ctx, *segments, field_name="first")
+        return ctx.query_text(*segments, "first")
     if mode == NameMode.FORMAL:
-        honorific = f"{query_resolved_field_text(ctx, *segments, field_name='honorific')}".strip()
+        honorific = ctx.query_text(*segments, "honorific").strip()
         if not honorific:
-            first = query_resolved_field_text(ctx, *segments, field_name="first").strip()
+            first = ctx.query_text(*segments, "first").strip()
             honorific = first[0] if first else ""
-        return (honorific + f"{query_resolved_field_text(ctx, *segments, field_name='last')}").strip()
+        return (honorific + ctx.query_text(*segments, "last")).strip()
     if mode == NameMode.LAST:
-        return query_resolved_field_text(ctx, *segments, field_name="last")
+        return ctx.query_text(*segments, "last")
     full_name = (
-        f"{query_resolved_field_text(ctx, *segments, field_name='honorific')} "
-        f"{query_resolved_field_text(ctx, *segments, field_name='first')} "
-        f"{query_resolved_field_text(ctx, *segments, field_name='middle')} "
-        f"{query_resolved_field_text(ctx, *segments, field_name='last')} "
-        f"{query_resolved_field_text(ctx, *segments, field_name='suffix')}"
+        f"{ctx.query_text(*segments, 'honorific')} "
+        f"{ctx.query_text(*segments, 'first')} "
+        f"{ctx.query_text(*segments, 'middle')} "
+        f"{ctx.query_text(*segments, 'last')} "
+        f"{ctx.query_text(*segments, 'suffix')}"
     ).strip()
     return full_name
 
@@ -170,10 +137,10 @@ def query_town(ctx: Context, *segments: str) -> str:
     if len(segments) == 0:
         segments = ("town",)
     return (
-        f"Name: {query_resolved_field_text(ctx, *segments, field_name='name')}\n"
-        f"Location: {query_resolved_field_text(ctx, *segments, field_name='location')}\n"
-        f"Economics: {query_resolved_field_text(ctx, *segments, field_name='economic')}\n"
-        f"Backstory: {query_resolved_field_text(ctx, *segments, field_name='backstory')}\n"
+        f"Name: {ctx.query_text(*segments, 'name')}\n"
+        f"Location: {ctx.query_text(*segments, 'location')}\n"
+        f"Economics: {ctx.query_text(*segments, 'economic')}\n"
+        f"Backstory: {ctx.query_text(*segments, 'backstory')}\n"
     )
 
 
@@ -181,18 +148,18 @@ def query_town_short(ctx: Context, *segments: str) -> str:
     if len(segments) == 0:
         segments = ("town",)
     return (
-        f"{query_resolved_field_text(ctx, *segments, field_name='name')}, "
-        f"{query_resolved_field_text(ctx, *segments, field_name='location')}"
+        f"{ctx.query_text(*segments, 'name')}, "
+        f"{ctx.query_text(*segments, 'location')}"
     )
 
 
 def query_newspaper(ctx: Context) -> str:
     segments = ("interview", "newspaper")
     return (
-        f"{query_resolved_field_text(ctx, *segments, field_name='title')}\n"
-        f"{query_resolved_field_text(ctx, *segments, field_name='publisher')} "
-        f"{query_resolved_field_text(ctx, *segments, field_name='circulation')} "
-        f"{query_resolved_field_text(ctx, *segments, field_name='date')} "
+        f"{ctx.query_text(*segments, 'title')}\n"
+        f"{ctx.query_text(*segments, 'publisher')} "
+        f"{ctx.query_text(*segments, 'circulation')} "
+        f"{ctx.query_text(*segments, 'date')} "
     )
 
 
@@ -200,16 +167,16 @@ def query_case(ctx: Context, *segments: str) -> str:
     if len(segments) == 0:
         segments = ("interview", "case1")
     return (
-        f"Case: {query_resolved_field_text(ctx, *segments, field_name='name')}\n"
-        f"Summary: {query_resolved_field_text(ctx, *segments, field_name='description')}"
+        f"Case: {ctx.query_text(*segments, 'name')}\n"
+        f"Summary: {ctx.query_text(*segments, 'description')}"
     )
 
 
 def query_advantage(ctx: Context, *segments: str) -> str:
     return (
-        f"Item: {query_resolved_field_text(ctx, *segments, field_name='book_or_equipment')}\n"
-        f"Skill: {query_resolved_field_text(ctx, *segments, field_name='implied_skill')}\n"
-        f"Advantage: {query_resolved_field_text(ctx, *segments, field_name='advantage')}\n"
+        f"Item: {ctx.query_text(*segments, 'book_or_equipment')}\n"
+        f"Skill: {ctx.query_text(*segments, 'implied_skill')}\n"
+        f"Advantage: {ctx.query_text(*segments, 'advantage')}\n"
     )
 
 

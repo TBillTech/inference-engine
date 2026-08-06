@@ -19,6 +19,8 @@ import json
 from enum import Enum, auto
 from typing import Any, Iterator, Sequence, Union
 
+from context_resolver.ast.paths import Path, PathSegment
+
 
 class NodeState(Enum):
     """Represents the completeness of a :class:`Node`'s value."""
@@ -84,6 +86,26 @@ class Node:
         contain child nodes should recursively delegate to those children.
         """
         return len(segments) == 0
+
+    def query_text(self, context: Any, *segments: PathSegment) -> str:
+        """Return display text for this node or one of its descendants."""
+        return self._query_text(context, Path(), segments)
+
+    def _query_text(
+        self,
+        context: Any,
+        current_path: Path,
+        segments: tuple[PathSegment, ...],
+    ) -> str:
+        from context_resolver.context.context import NodeNotFoundError
+
+        if segments:
+            target_path = current_path / Path(*segments)
+            raise NodeNotFoundError(f"Path {target_path} not found in Context")
+        return self._query_text_value()
+
+    def _query_text_value(self) -> str:
+        return repr(self)
 
     # ------------------------------------------------------------------
     # State
@@ -211,6 +233,9 @@ class ScalarNode(Node):
     def _match_path(self, segments: tuple[Union[str, int], ...]) -> bool:
         return len(segments) == 0
 
+    def _query_text_value(self) -> str:
+        return str(self._value) if self._value is not None else "<unspecified>"
+
 
 class MappingNode(Node):
     """
@@ -266,6 +291,36 @@ class MappingNode(Node):
         if child is None:
             return False
         return child._match_path(segments[1:])
+
+    def _query_text(
+        self,
+        context: Any,
+        current_path: Path,
+        segments: tuple[PathSegment, ...],
+    ) -> str:
+        from context_resolver.context.context import NodeNotFoundError
+
+        if not segments:
+            return self._query_text_value()
+
+        head = segments[0]
+        if not isinstance(head, str):
+            target_path = current_path / Path(*segments)
+            raise NodeNotFoundError(f"Path {target_path} not found in Context")
+
+        child = self.get(head)
+        if child is None:
+            target_path = current_path / Path(*segments)
+            raise NodeNotFoundError(f"Path {target_path} not found in Context")
+
+        return child._query_text(context, current_path / head, segments[1:])
+
+    def _query_text_value(self) -> str:
+        for _, child in self.items():
+            if isinstance(child, ScalarNode) and child.value is not None:
+                return str(child.value)
+        parts = ", ".join(f"{k}: {v._query_text_value()}" for k, v in self.items())
+        return "{" + parts + "}"
 
     # ------------------------------------------------------------------
     # State
@@ -372,6 +427,33 @@ class SequenceNode(Node):
         if child is None:
             return False
         return child._match_path(segments[1:])
+
+    def _query_text(
+        self,
+        context: Any,
+        current_path: Path,
+        segments: tuple[PathSegment, ...],
+    ) -> str:
+        from context_resolver.context.context import NodeNotFoundError
+
+        if not segments:
+            return self._query_text_value()
+
+        head = segments[0]
+        if not isinstance(head, int):
+            target_path = current_path / Path(*segments)
+            raise NodeNotFoundError(f"Path {target_path} not found in Context")
+
+        child = self.get(head)
+        if child is None:
+            target_path = current_path / Path(*segments)
+            raise NodeNotFoundError(f"Path {target_path} not found in Context")
+
+        return child._query_text(context, current_path / head, segments[1:])
+
+    def _query_text_value(self) -> str:
+        items = [item._query_text_value() for item in self]
+        return "[" + ", ".join(items) + "]" if items else "[]"
 
     # ------------------------------------------------------------------
     # State

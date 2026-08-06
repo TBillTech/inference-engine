@@ -186,25 +186,61 @@ class Context:
                 logger.debug("Cache hit for %s", path)
                 return cached
 
-        # Walk the tree.
-        node = _resolve_path(self._root, path)
+        node, can_cache = self._query_with_resolution(path)
         if node is None:
             raise NodeNotFoundError(f"Path {path} not found in Context")
 
-        # Already fully specified – cache and return.
-        if node.is_fully_specified:
+        if node.is_fully_specified and can_cache:
             self._cache[path] = node
+
+        return node
+
+    def _query_with_resolution(self, path: Path) -> tuple[Node | None, bool]:
+        """Walk *path*, resolving ResolvableNode ancestors as needed."""
+        current: Node = self._root
+        current_path = Path()
+        traversed_resolved_result = False
+
+        for segment in path.segments:
+            if isinstance(current, ResolvableNode):
+                current = self.query(current_path)
+                if isinstance(current, ResolvableNode):
+                    if current.result is None:
+                        return None, False
+                    current = current.result
+                    traversed_resolved_result = True
+
+            if isinstance(segment, str) and isinstance(current, MappingNode):
+                child = current.get(segment)
+                if child is None:
+                    return None, False
+                current = child
+                current_path = current_path / segment
+                continue
+
+            if isinstance(segment, int) and isinstance(current, SequenceNode):
+                child = current.get(segment)
+                if child is None:
+                    return None, False
+                current = child
+                current_path = current_path / segment
+                continue
+
+            return None, False
+
+        if isinstance(current, ResolvableNode):
+            current = self._resolve_terminal_node(current, current_path)
+            return current, True
+
+        return current, not traversed_resolved_result
+
+    def _resolve_terminal_node(self, node: ResolvableNode, path: Path) -> Node:
+        """Resolve and return the node addressed exactly by *path*."""
+        if node.is_fully_specified:
             return node
 
-        # Resolve the node.
         logger.debug("Resolving node at %s", path)
-        resolved = self._resolver.resolve_node(node, path, self._root)
-
-        # If resolution produced a fully-specified node, cache it.
-        if resolved.is_fully_specified:
-            self._cache[path] = resolved
-
-        return resolved
+        return self._resolver.resolve_node(node, path, self)
 
     def has_path(self, path: Path) -> bool:
         """Return ``True`` when *path* exists in the Context tree."""
@@ -247,6 +283,10 @@ class Context:
 
         node = self.query(path)
         return _extract_scalar(node)
+
+    def query_text(self, *segments: str | int) -> str:
+        """Return display text for the node addressed by *segments*."""
+        return self._root.query_text(self, *segments)
 
     @property
     def root(self) -> Node:

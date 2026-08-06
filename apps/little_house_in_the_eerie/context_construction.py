@@ -301,7 +301,7 @@ def build_initial_context() -> Context:
             "Feel free to merge or harmonize clues that seem related. "
             "Try to be detail oriented, but not exhaustive, this should be a story not a set of bullet points. "
             "Feel free to add obvious interpretive connections. "
-            "Preface the entry with the case name: {case.name}, on date {case.date}. "
+            "Preface the entry with the case name: {case.name}, on date {newspaper.date}. "
             "The case description is: {case.description}. "
             "The clues related to the case are: {notebook.clues}. "
             "Describe the case like you are the one who found the clues. "
@@ -434,7 +434,6 @@ def build_initial_context() -> Context:
             "case": MappingNode(
                 {
                     "name": PLACE_HOLDER,
-                    "case_date": PLACE_HOLDER,
                     "description": PLACE_HOLDER,
                 }
             ),

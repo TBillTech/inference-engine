@@ -51,6 +51,15 @@ from context_resolver.templates.template import Template, TemplateRegistry
 logger = logging.getLogger(__name__)
 
 
+def _split_resolution_target(target: Any) -> tuple[Node, Any | None]:
+    """Return ``(root, context)`` for a resolver target."""
+    from context_resolver.context.context import Context
+
+    if isinstance(target, Context):
+        return target.root, target
+    return target, None
+
+
 class ResolutionError(Exception):
     """Raised when query-based resolution fails for any reason."""
 
@@ -108,9 +117,9 @@ class Resolver:
     # Core resolution
     # ------------------------------------------------------------------
 
-    def resolve_node(self, node: Node, path: Path, root: Node) -> Node:
+    def resolve_node(self, node: Node, path: Path, target: Any) -> Node:
         """
-        Resolve *node* at *path* against the Context *root*.
+        Resolve *node* at *path* against a Context or root node.
 
         Returns the node after all applicable passes have been applied.
         The caller is responsible for storing the result back into the tree.
@@ -121,8 +130,8 @@ class Resolver:
             The node to resolve.
         path:
             The path of *node* within the Context tree.
-        root:
-            The root node of the Context tree (used for resolving bindings).
+        target:
+            Either the live Context or the root node of the Context tree.
 
         Raises
         ------
@@ -142,11 +151,12 @@ class Resolver:
         self._in_progress.add(path)
 
         try:
-            return self._resolve_node_inner(node, path, root)
+            return self._resolve_node_inner(node, path, target)
         finally:
             self._in_progress.discard(path)
 
-    def _resolve_node_inner(self, node: Node, path: Path, root: Node) -> Node:
+    def _resolve_node_inner(self, node: Node, path: Path, target: Any) -> Node:
+        root, _ = _split_resolution_target(target)
         # 1. Run deterministic passes.
         pass_ctx = PassContext(root)
         for p in self._passes:
@@ -158,14 +168,15 @@ class Resolver:
 
         # 2. Handle ResolvableNodes specially.
         if isinstance(node, ResolvableNode):
-            return self._resolve_resolvable_node(node, path, root)
+            return self._resolve_resolvable_node(node, path, target)
 
         return node
 
     def _resolve_resolvable_node(
-        self, node: ResolvableNode, path: Path, root: Node
+        self, node: ResolvableNode, path: Path, target: Any
     ) -> ResolvableNode:
         """Drive resolution for a single ResolvableNode."""
+        root, context = _split_resolution_target(target)
         # Find the resolution pass (first one wins).
         resolution_pass: ResolutionPass | None = None
         for p in self._passes:
@@ -184,6 +195,16 @@ class Resolver:
         bound_values: dict[str, Any] = {}
         for var_name, dep_path in node.input_bindings.items():
             self._dependency_graph.add_dependency(path, dep_path)
+            if context is not None:
+                try:
+                    bound_values[var_name] = context.query_text(*dep_path.segments)
+                except Exception as exc:
+                    raise ResolutionError(
+                        f"ResolvableNode at {path}: binding '{var_name}' references "
+                        f"unknown path {dep_path}"
+                    ) from exc
+                continue
+
             dep_node = _resolve_path(root, dep_path)
             if dep_node is None:
                 raise ResolutionError(
@@ -192,7 +213,7 @@ class Resolver:
                 )
             # Recursively resolve if needed.
             if not dep_node.is_fully_specified:
-                dep_node = self.resolve_node(dep_node, dep_path, root)
+                dep_node = self.resolve_node(dep_node, dep_path, target)
             bound_values[var_name] = _extract_scalar(dep_node)
 
         # Look up and render the template.

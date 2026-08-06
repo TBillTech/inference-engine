@@ -162,8 +162,8 @@ Usually you should first type a command, followed by a space and then the argume
 Commands:
   help                  Show this help.
   quit / exit           End the session.
-    save <n>              Save the game to save_<n>.pkl in the current directory.
-    load <n>              Load the game from save_<n>.pkl in the current directory.
+  save <n>              Save the game to save_<n>.pkl in the current directory.
+  load <n>              Load the game from save_<n>.pkl in the current directory.
   look diary <n>        Look at the diary page n counting up from the beginning, or if negative, backward from the end.
   look daybook          Look at the full current day log
   look daybook <n>      Look at the full day log for day n counting up from the beginning, or if negative, backward from the end.
@@ -267,19 +267,19 @@ def run_repl(ctx: Context) -> None:
             elif target[0] == "daybook":
                 print_str = get_notebook_log(ctx, int(target[1]) if len(target) > 1 else -1)
             elif target[0] == "clues":
-                print_str = get_notebook_clue_summary(ctx)
+                print_str = get_clue_summary(ctx)
             elif target[0] == "case":
-                print_str = get_notebook_case_summary(ctx)
+                print_str = get_case_summary(ctx)
             elif target[0] == "investigator":
-                print_str = get_notebook_investigator_summary(ctx)
+                print_str = get_investigator_summary(ctx)
             elif target[0] == "secrets":
-                print_str = get_notebook_secrets_summary(ctx)
+                print_str = get_secrets_summary(ctx)
             elif target[0] == "town":
-                print_str = get_notebook_town_summary(ctx)
+                print_str = get_town_summary(ctx)
             elif target[0] == "location":
-                print_str = get_notebook_location_summary(ctx, target[1])
+                print_str = get_location_summary(ctx, target[1])
             elif target[0] == "scene":
-                print_str = get_notebook_scene_summary(ctx)
+                print_str = get_scene_summary(ctx)
             if print_str == None:
                 print(
                     format_prompt(

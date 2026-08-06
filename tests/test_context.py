@@ -193,6 +193,12 @@ class TestContextResolvableNode:
         result = node.result
         assert result is not None
 
+    def test_query_descends_into_resolved_result(self, resolvable_context):
+        node = resolvable_context.query(Path("greeting", "greeting"))
+
+        assert isinstance(node, ScalarNode)
+        assert node.value == "Hello, Carol!"
+
     def test_resolved_greeting_value(self, resolvable_context):
         node = resolvable_context.query(Path("greeting"))
         assert isinstance(node, ResolvableNode)
@@ -233,6 +239,124 @@ class TestContextResolvableNode:
         assert greeting_node.is_configured()
         assert greeting_node.input_bindings == {"name": Path("name")}
         assert greeting_node.dependencies == [Path("name")]
+
+    def test_template_binding_uses_query_text_for_nested_resolved_field(self):
+        scene_schema = Schema(
+            name="SceneSchema",
+            fields=[FieldSpec("description", type="str", required=True)],
+        )
+        line_schema = Schema(
+            name="LineSchema",
+            fields=[FieldSpec("line", type="str", required=True)],
+        )
+        scene = ResolvableNode(
+            template_ref="scene",
+            input_bindings={"seed": Path("seed")},
+            output_schema=scene_schema,
+        )
+        narrator = ResolvableNode(
+            template_ref="narrator",
+            input_bindings={"scene.description": Path("scene", "description")},
+            output_schema=line_schema,
+        )
+        root = MappingNode(
+            {
+                "seed": ScalarNode("foggy wharf"),
+                "scene": scene,
+                "narrator": narrator,
+            }
+        )
+        registry = TemplateRegistry()
+        registry.register(Template("scene", "Scene seed: {seed}"))
+        registry.register(Template("narrator", "Describe: {scene.description}"))
+        mock = MockProvider(
+            responses={
+                "Scene seed: foggy wharf": {"description": "A foggy wharf at dawn."},
+                "Describe: A foggy wharf at dawn.": {"line": "Gulls cry over black water."},
+            }
+        )
+        resolver = Resolver(template_registry=registry, passes=[ResolutionPass(mock)])
+        ctx = Context(root=root, resolver=resolver)
+
+        node = ctx.query(Path("narrator"))
+
+        assert isinstance(node, ResolvableNode)
+        assert node.result is not None
+        assert node.result.get("line").value == "Gulls cry over black water."  # type: ignore[union-attr]
+        assert mock.call_count == 2
+
+    def test_query_descendant_under_resolved_result_is_not_stale_after_mutation(self):
+        scene_schema = Schema(
+            name="SceneSchema",
+            fields=[FieldSpec("description", type="str", required=True)],
+        )
+        scene = ResolvableNode(
+            template_ref="scene",
+            input_bindings={"seed": Path("seed")},
+            output_schema=scene_schema,
+        )
+        root = MappingNode(
+            {
+                "seed": ScalarNode("foggy wharf"),
+                "scene": scene,
+            }
+        )
+        registry = TemplateRegistry()
+        registry.register(Template("scene", "Scene seed: {seed}"))
+        mock = MockProvider(
+            responses={
+                "Scene seed: foggy wharf": {"description": "A foggy wharf at dawn."},
+                "Scene seed: storm cellar": {"description": "A storm cellar under the chapel."},
+            }
+        )
+        resolver = Resolver(template_registry=registry, passes=[ResolutionPass(mock)])
+        ctx = Context(root=root, resolver=resolver)
+
+        first = ctx.query(Path("scene", "description"))
+        ctx.set(Path("seed"), ScalarNode("storm cellar"))
+        second = ctx.query(Path("scene", "description"))
+
+        assert isinstance(first, ScalarNode)
+        assert first.value == "A foggy wharf at dawn."
+        assert isinstance(second, ScalarNode)
+        assert second.value == "A storm cellar under the chapel."
+        assert mock.call_count == 2
+
+    def test_get_value_descends_into_resolved_result(self, resolvable_context):
+        value = resolvable_context.get_value(Path("greeting", "greeting"))
+
+        assert value == "Hello, Carol!"
+
+    def test_template_binding_uses_query_text_formatting_for_sequence(self):
+        schema = Schema(
+            name="SummarySchema",
+            fields=[FieldSpec("summary", type="str", required=True)],
+        )
+        summary = ResolvableNode(
+            template_ref="summary",
+            input_bindings={"items": Path("items")},
+            output_schema=schema,
+        )
+        root = MappingNode(
+            {
+                "items": SequenceNode([ScalarNode("sword"), ScalarNode("shield")]),
+                "summary": summary,
+            }
+        )
+        registry = TemplateRegistry()
+        registry.register(Template("summary", "Items: {items}"))
+        mock = MockProvider(
+            responses={
+                "Items: [sword, shield]": {"summary": "ready"},
+            }
+        )
+        resolver = Resolver(template_registry=registry, passes=[ResolutionPass(mock)])
+        ctx = Context(root=root, resolver=resolver)
+
+        ctx.query(Path("summary"))
+
+        assert mock.last_request is not None
+        assert mock.last_request.prompt == "Items: [sword, shield]"
 
     def test_resolvable_node_metadata_temperature_flows_to_request(self):
         captured_temperature = None

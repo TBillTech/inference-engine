@@ -19,11 +19,8 @@ from apps.little_house_in_the_eerie.context_access_helpers import (
     query_case,
     query_investigator_name,
     query_newspaper,
-    query_resolved_field_text,
-    query_text,
     query_town,
     query_town_short,
-    scalar,
     set_keyed_node,
     set_not_hint,
 )
@@ -183,15 +180,15 @@ def post_interview_initialization(ctx: Context) -> None:
     secret_count = sequence_len(ctx, "investigator", "secrets")
     set_keyed_node(ctx, ScalarNode(secret_count), "investigator", "instability")
 
-    query_text(ctx, "investigator", "attributes")
+    ctx.query_text("investigator", "attributes")
 
     name = query_investigator_name(ctx, NameMode.FULL)
-    archetype = query_text(ctx, "investigator", "archetype")
-    case_name = scalar(ctx, "case", "name")
-    case_summary = scalar(ctx, "case", "description")
-    interest = query_text(ctx, "investigator", "interest", "interest")
+    archetype = ctx.query_text("investigator", "archetype")
+    case_name = ctx.query_text("case", "name")
+    case_summary = ctx.query_text("case", "description")
+    interest = ctx.query_text("investigator", "interest", "interest")
     advantages = sequence_len(ctx, "investigator", "advantages")
-    atmosphere_date = query_text(ctx, "atmosphere", "date")
+    atmosphere_date = ctx.query_text("atmosphere", "date")
     daybook_info = (
         f"{name}'s {archetype} Investigative Journal\n"
         f"Day: {atmosphere_date}\n"
@@ -204,10 +201,11 @@ def post_interview_initialization(ctx: Context) -> None:
         f"I have a personal stake in this case: {interest}. "
     )
     set_keyed_node(ctx, ScalarNode(summary), "notebook", "diary_raw")
-    diary_summary = query_text(ctx, "notebook", "diary_entry")
+    diary_summary = ctx.query_text("notebook", "diary_entry")
 
     append_sequence_node(ctx, ("notebook", "daybook"), ScalarNode(daybook_info))
     append_sequence_node(ctx, ("notebook", "daybook"), ScalarNode(summary))
+    append_sequence_node(ctx, ("notebook", "diary_dates"), ScalarNode(ctx.query_text("atmosphere", "date")))
     append_sequence_node(ctx, ("notebook", "diary"), ScalarNode(diary_summary))
 
 
@@ -288,10 +286,10 @@ def handle_interview_choose_name(ctx: Context, ms: MachineState, cmd: Command) -
 
     options = [
         Command(verb=Verb.CMD_CHOICE, ordinal=1, arg=f"My name is not: {get_not_hint(ctx)}"),
-        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"My first name: {scalar(ctx, 'interview', 'first_name_hint')}"),
-        Command(verb=Verb.CMD_CHOICE, ordinal=3, arg=f"The rest of my name: {scalar(ctx, 'interview', 'last_name_hint')}"),
-        Command(verb=Verb.CMD_CHOICE, ordinal=4, arg=f"My honorific is: {scalar(ctx, 'interview', 'honorific_hint')}"),
-        Command(verb=Verb.CMD_CHOICE, ordinal=5, arg=f"My suffix is: {scalar(ctx, 'interview', 'suffix_hint')}"),
+        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"My first name: {ctx.query_text('interview', 'first_name_hint')}"),
+        Command(verb=Verb.CMD_CHOICE, ordinal=3, arg=f"The rest of my name: {ctx.query_text('interview', 'last_name_hint')}"),
+        Command(verb=Verb.CMD_CHOICE, ordinal=4, arg=f"My honorific is: {ctx.query_text('interview', 'honorific_hint')}"),
+        Command(verb=Verb.CMD_CHOICE, ordinal=5, arg=f"My suffix is: {ctx.query_text('interview', 'suffix_hint')}"),
         Command(verb=Verb.CMD_CONFIRM, arg=query_investigator_name(ctx, NameMode.FULL, "interview", "name_guess1")),
         Command(verb=Verb.CMD_NOPE, arg="That sounds like someone with a similiar interest but; try thinking again ..."),
     ]
@@ -310,18 +308,18 @@ def handle_interview_choose_archetype(ctx: Context, ms: MachineState, cmd: Comma
             set_keyed_node(ctx, ScalarNode(cmd.arg), "interview", "archetype_hint")
         invalidate(ctx, "interview", "archetype1")
     if cmd.verb == Verb.CMD_CONFIRM:
-        archetype = query_text(ctx, "interview", "archetype1")
+        archetype = ctx.query_text("interview", "archetype1")
         set_keyed_node(ctx, ScalarNode(archetype), "investigator", "archetype")
         set_not_hint(ctx, "")
         return Transition(Phase.INTERVIEW_CHOOSE_NAME)
     if cmd.verb == Verb.CMD_NOPE:
-        append_not_hint(ctx, query_text(ctx, "interview", "archetype1"))
+        append_not_hint(ctx, ctx.query_text("interview", "archetype1"))
         invalidate(ctx, "interview", "archetype1")
 
     options = [
         Command(verb=Verb.CMD_CHOICE, ordinal=1, arg=f"You are _not_ a: {get_not_hint(ctx)}"),
-        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"You describe yourself as: {scalar(ctx, 'interview', 'archetype_hint')}"),
-        Command(verb=Verb.CMD_CONFIRM, arg=f"{query_text(ctx, 'interview', 'archetype1')}?"),
+        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"You describe yourself as: {ctx.query_text('interview', 'archetype_hint')}"),
+        Command(verb=Verb.CMD_CONFIRM, arg=f"{ctx.query_text('interview', 'archetype1')}?"),
         Command(verb=Verb.CMD_NOPE, arg="You recall your methods and approach; try thinking again ..."),
     ]
     return PromptOptions(prompt=prompt, options=options)
@@ -336,7 +334,7 @@ def handle_interview_choose_town(ctx: Context, ms: MachineState, cmd: Command) -
         '"My name is '
         + query_investigator_name(ctx, NameMode.FULL)
     )
-    prompt += f' and I am a {query_text(ctx, "investigator", "archetype")}."\n'
+    prompt += f' and I am a {ctx.query_text("investigator", "archetype")}."\n'
     prompt += (
         '"Hmm, yes, I see", she continues, "How are you feeling?"\n'
         'You reply, "Ugh. Minor pains all over. I feel like I was in a car wreck!"\n'
@@ -369,7 +367,7 @@ def handle_interview_choose_town(ctx: Context, ms: MachineState, cmd: Command) -
 
     options = [
         Command(verb=Verb.CMD_CHOICE, ordinal=1, arg=f"The town was not: {get_not_hint(ctx)}"),
-        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"You recall the town was: {scalar(ctx, 'interview', 'destination_hint')}"),
+        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"You recall the town was: {ctx.query_text('interview', 'destination_hint')}"),
         Command(verb=Verb.CMD_CONFIRM, arg=f"{query_town(ctx, 'interview', 'brochure1')}"),
         Command(verb=Verb.CMD_NOPE, arg="That wasn't the place; turn to the next page ..."),
     ]
@@ -381,7 +379,7 @@ def handle_interview_choose_newspaper(ctx: Context, ms: MachineState, cmd: Comma
         return handle_interview_choose_newspaper(ctx, ms, cmd_noop)
 
     prompt = (
-        f"Yes, you remember now! This is {query_resolved_field_text(ctx, 'town', field_name='name')}. "
+        f"Yes, you remember now! This is {ctx.query_text('town', 'name')}. "
         "The question remains: Why did you come here? Not just for the sight seeing! "
         "With a start (or is it a shudder) you notice a newspaper sitting on the nightstand. "
         "You can barely read the Newspaper Title from where you sit. "
@@ -403,7 +401,7 @@ def handle_interview_choose_newspaper(ctx: Context, ms: MachineState, cmd: Comma
 
     options = [
         Command(verb=Verb.CMD_CHOICE, ordinal=1, arg=f"The newspaper isn't: {get_not_hint(ctx)}"),
-        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"The day must be: {scalar(ctx, 'interview', 'date_hint')}"),
+        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"The day must be: {ctx.query_text('interview', 'date_hint')}"),
         Command(verb=Verb.CMD_CONFIRM, arg=f"{query_newspaper(ctx)}"),
         Command(verb=Verb.CMD_NOPE, arg="You must be seeing things ..."),
     ]
@@ -432,7 +430,7 @@ def handle_interview_choose_case(ctx: Context, ms: MachineState, cmd: Command) -
 
     options = [
         Command(verb=Verb.CMD_CHOICE, ordinal=1, arg=f"The case is not: {get_not_hint(ctx)}"),
-        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"The case should be: {scalar(ctx, 'interview', 'case_hint')}"),
+        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"The case should be: {ctx.query_text('interview', 'case_hint')}"),
         Command(verb=Verb.CMD_CONFIRM, arg=f"{query_case(ctx, 'interview', 'case1')}"),
         Command(verb=Verb.CMD_NOPE, arg="None of these ring a bell; turn to the next page ..."),
     ]
@@ -456,13 +454,13 @@ def handle_interview_choose_interest(ctx: Context, ms: MachineState, cmd: Comman
         set_not_hint(ctx, " involving the syndicate or law enforcement ")
         return Transition.phase_change(Phase.INTERVIEW_CHOOSE_SECRETS)
     if cmd.verb == Verb.CMD_NOPE:
-        append_not_hint(ctx, query_resolved_field_text(ctx, "interview", "interest1", field_name="interest"))
+        append_not_hint(ctx, ctx.query_text("interview", "interest1", "interest"))
         invalidate(ctx, "interview", "interest1")
 
     options = [
         Command(verb=Verb.CMD_CHOICE, ordinal=1, arg=f"My reason is not: {get_not_hint(ctx)}"),
-        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"My reason is more: {scalar(ctx, 'interview', 'interest_hint')}"),
-        Command(verb=Verb.CMD_CONFIRM, arg=f"{query_resolved_field_text(ctx, 'interview', 'interest1', field_name='interest')}"),
+        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"My reason is more: {ctx.query_text('interview', 'interest_hint')}"),
+        Command(verb=Verb.CMD_CONFIRM, arg=f"{ctx.query_text('interview', 'interest1', 'interest')}"),
         Command(verb=Verb.CMD_NOPE, arg="Maybe somebody would expect that; but that's not it ..."),
     ]
     return Transition.prompt_options(prompt, options)
@@ -490,7 +488,7 @@ def handle_interview_choose_secrets(ctx: Context, ms: MachineState, cmd: Command
         invalidate(ctx, "interview", "secret1")
 
     if cmd.verb == Verb.CMD_CONFIRM:
-        secret_text = query_resolved_field_text(ctx, "interview", "secret1", field_name="secret")
+        secret_text = ctx.query_text("interview", "secret1", "secret")
         secret_count = append_sequence_node(ctx, ("investigator", "secrets"), ScalarNode(secret_text))
         append_not_hint(ctx, secret_text)
         invalidate(ctx, "interview", "secret1")
@@ -500,13 +498,13 @@ def handle_interview_choose_secrets(ctx: Context, ms: MachineState, cmd: Command
         return handle_interview_choose_secrets(ctx, ms, cmd_noop)
 
     if cmd.verb == Verb.CMD_NOPE:
-        append_not_hint(ctx, query_resolved_field_text(ctx, "interview", "secret1", field_name="secret"))
+        append_not_hint(ctx, ctx.query_text("interview", "secret1", "secret"))
         invalidate(ctx, "interview", "secret1")
 
     options = [
         Command(verb=Verb.CMD_CHOICE, ordinal=1, arg=f"My secret is not: {get_not_hint(ctx)}"),
-        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"My secret should be more: {scalar(ctx, 'interview', 'secrets_hint')}"),
-        Command(verb=Verb.CMD_CONFIRM, arg=f"{query_resolved_field_text(ctx, 'interview', 'secret1', field_name='secret')}"),
+        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"My secret should be more: {ctx.query_text('interview', 'secrets_hint')}"),
+        Command(verb=Verb.CMD_CONFIRM, arg=f"{ctx.query_text('interview', 'secret1', 'secret')}"),
         Command(verb=Verb.CMD_NOPE, arg="Ha! My real secret is darker than that ..."),
     ]
     return PromptOptions(prompt=prompt, options=options)
@@ -547,12 +545,12 @@ def handle_interview_choose_advantages(ctx: Context, ms: MachineState, cmd: Comm
         return handle_interview_choose_advantages(ctx, ms, cmd_noop)
 
     if cmd.verb == Verb.CMD_NOPE:
-        append_not_hint(ctx, query_resolved_field_text(ctx, "interview", "advantage1", field_name="advantage"))
+        append_not_hint(ctx, ctx.query_text("interview", "advantage1", "advantage"))
         invalidate(ctx, "interview", "advantage1")
 
     options = [
         Command(verb=Verb.CMD_CHOICE, ordinal=1, arg=f"I did not pack: {get_not_hint(ctx)}"),
-        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"I needed something for: {scalar(ctx, 'interview', 'advantage_hint')}"),
+        Command(verb=Verb.CMD_CHOICE, ordinal=2, arg=f"I needed something for: {ctx.query_text('interview', 'advantage_hint')}"),
         Command(verb=Verb.CMD_CHOICE, ordinal=3, arg="I didn't bring anything else with me."),
         Command(verb=Verb.CMD_CONFIRM, arg=f"{query_advantage(ctx, 'interview', 'advantage1')}"),
         Command(verb=Verb.CMD_NOPE, arg="No, I packed something else ..."),
