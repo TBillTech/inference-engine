@@ -203,6 +203,30 @@ def simple_schema(name: str, field_name: str, template_str: str) -> tuple[JSONOu
     )
     return (template, schema)
 
+def function_schema(name: str, field_name: str, function: str, arglist: [str]) -> tuple[JSONOutputFunction, Any]:
+    from context_resolver.ast.schema import FieldSpec, Schema
+
+    key = name.replace(" ", "")
+    schema = Schema(
+        name=key,
+        fields=[
+            FieldSpec(
+                name=field_name,
+                type="str",
+                required=True,
+                description=f"A {name}.",
+            )
+        ],
+    )
+    fn = JSONOutputFunction(
+        name=key,
+        arglist=arglist,
+        python_fn=function,
+        schema=schema,
+        description=f"A computation of {name}.",
+    )
+    return (fn, schema)
+
 
 def template_schema_tuple(template_str: str, schema: Any, description: str) -> tuple[JSONOutputTemplate, Any]:
     template = JSONOutputTemplate(

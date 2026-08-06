@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from context_resolver.ast.nodes import MappingNode, ScalarNode, SequenceNode
 from context_resolver.ast.resolvable_node import ResolvableNode
+from context_resolver.ast.python_function_node import FunctionNode
 from context_resolver.ast.schema import FieldSpec, Schema
 from context_resolver.context.context import Context
 from context_resolver.inference.llama_cpp_provider import LocalLlamaCppProvider
@@ -113,6 +114,7 @@ def build_initial_context() -> Context:
             "The investigator archetype is {investigator.archetype}. "
             "Town: {town.name}, location: {town.location}, economy: {town.economic}, secret backstory: {town.backstory}. "
             "Invent a current sketchy headline and a short sensational description for {interview.case_hint}. "
+            "The case should _NOT_ be overtly paranormal, just peripherally paranormal. There should be something spooky about the case, but something most people could ignore if they try. "
             "This case _should_ at least lean toward the supernatural, and may use the town backstory as a canvas and background."
             "Ideally the case exacerbates and somehow flows from the negative energy of the town as the seed where the eerie breaks into our world "
             "through the weakening and decay of human virtues. "
@@ -232,30 +234,59 @@ def build_initial_context() -> Context:
     )
     registry.register(advantage[0])
 
-    vibe = template_schema_tuple(
-        template_str=(
-            "Describe the weather, vibe, and urgency each in one sentence. "
+    def sun_dial_fn(hour_of_day: int, minute_of_day: int, post_meridian: bool) -> str:
+        if post_meridian:
+            if 12 == hour_of_day:
+                return "High Noon"
+            if 1 <= hour_of_day <= 3:
+                return "Mid Afternoon"
+            if 3 <= hour_of_day <= 5:
+                return "Late Afternoon"
+            if 5 <= hour_of_day <= 7:
+                return "Early Evening"
+            if 7 <= hour_of_day <= 10:
+                return "Evening"
+            if 10 <= hour_of_day <= 11:
+                return "Late Evening"
+        else:
+            if 12 == hour_of_day:
+                return "Midnight"
+            if 1 <= hour_of_day <= 3:
+                return "Late Night"
+            if 3 <= hour_of_day <= 5:
+                return "Pre Dawn Morning"
+            if 5 <= hour_of_day <= 7:
+                return "Early Morning"
+            if 7 <= hour_of_day <= 12:
+                return "Morning"
+
+    sun_dial = function_schema(
+        "Sun Dial",
+        "sun_dial",
+        ["atmosphere.hour_of_day", "atmosphere.minute_of_day", "atmosphere.post_meridian"],
+        sun_dial_fn
+    )
+    registry.register(sun_dial[0])
+
+    vibe = simple_schema(
+        "Vibe",
+        "vibe",
+        (
             "Scene location: {scene.location}. Scene specifics: {scene.specifics}. "
             "Time: {atmosphere.hour_of_day}:{atmosphere.minute_of_day}, PM flag: {atmosphere.post_meridian}. "
             "Prior weather: {atmosphere.prior_weather}. Weather trend: {atmosphere.weather_changing}. "
             "Current timestep: {atmosphere.time_limit} out of 12."
-        ),
-        schema=Schema(
-            name="Vibe",
-            fields=[
-                FieldSpec(name="weather", type="str", required=True, description="Weather conditions."),
-                FieldSpec(name="vibe", type="str", required=True, description="Atmosphere feeling."),
-                FieldSpec(name="urgency", type="str", required=True, description="How urgent the moment feels."),
-            ],
-        ),
-        description="Weather, mood, and urgency for the current scene.",
-    )
+            "It _IS_ {atmosphere.sun_dial}, so describe conditions with that in mind.\n"
+            "Describe the weather conditions, scene atmosphere feeling, and how urgent the moment feels in one or two sentences. "
+            "Be careful not to describe something contradictory like call it \"evening\" when it is A.M."
+        ))
     registry.register(vibe[0])
 
     little_house_description = simple_schema(
         "Little House Description",
         "description",
-        "Provide one atmospheric sentence describing the Little House in {town.name}.",
+        "Provide a couple atmospheric sentences describing the Little House Bed and Breakfast owned by "
+        "Mable and Earl Jenner in {town.name}.  Nearby the Little House B&B lies the ruins of a bridge that collapsed under a rental car. ",
     )
     registry.register(little_house_description[0])
 
@@ -300,7 +331,9 @@ def build_initial_context() -> Context:
             "Summarize the following case details in a coherent first person description (like a report to a superior). "
             "Feel free to merge or harmonize clues that seem related. "
             "Try to be detail oriented, but not exhaustive, this should be a story not a set of bullet points. "
-            "Feel free to add obvious interpretive connections. "
+            "Feel free to add obvious interpretive connections. Keep it about the same length as the case description. "
+            "Do not add follow up ideas, even if they seem obvious. Those will be decided later. Instead you may add a leading question or two. "
+            "My activities so far today have been: {notebook.daybook} "
             "Preface the entry with the case name: {case.name}, on date {newspaper.date}. "
             "The case description is: {case.description}. "
             "The clues related to the case are: {notebook.clues}. "
@@ -358,6 +391,8 @@ def build_initial_context() -> Context:
         "summary",
         (
             "Clean up and prose format the following town name and description.\n"
+            "Make it from the point of view of a visitor who is systematically exploring the town, and will explore more.\n"
+            "Note that the locations list is _not_ exhaustive, these are the locations that have been explicity visited by the investigator so far.\n"
             "{print_summaries.town_data}"
         )
     )
@@ -480,9 +515,9 @@ def build_initial_context() -> Context:
             ),
             "locations": MappingNode(
                 {
-                    "Little House": MappingNode(
+                    "Little House Bed and Breakfast": MappingNode(
                         {
-                            "name": ScalarNode("Little House"),
+                            "name": ScalarNode("Little House Bed and Breakfast"),
                             "description": ResolvableNode(*little_house_description),
                         }
                     )
@@ -519,6 +554,7 @@ def build_initial_context() -> Context:
                     "hour_of_day": ScalarNode(8),
                     "minute_of_day": ScalarNode(20),
                     "post_meridian": ScalarNode(False),
+                    "sun_dial": ResolvableNode(*sun_dial),
                     "prior_date": ResolvableNode(*invent_date),
                     "date": ResolvableNode(*date_generator),
                     "weather_changing": ScalarNode("Not changing"),

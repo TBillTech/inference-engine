@@ -49,7 +49,8 @@ from apps.little_house_in_the_eerie.window_print_functions import (
     get_secrets_summary,
     get_town_summary,
     get_location_summary,
-    get_scene_summary
+    get_scene_summary,
+    get_vibe_summary,
 )
 
 
@@ -280,6 +281,8 @@ def run_repl(ctx: Context) -> None:
                 print_str = get_location_summary(ctx, target[1])
             elif target[0] == "scene":
                 print_str = get_scene_summary(ctx)
+            elif target[0] == "vibe":
+                print_str = get_vibe_summary(ctx)
             if print_str == None:
                 print(
                     format_prompt(

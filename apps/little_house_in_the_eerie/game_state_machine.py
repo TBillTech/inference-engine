@@ -194,8 +194,11 @@ def post_interview_initialization(ctx: Context) -> None:
         f"Day: {atmosphere_date}\n"
     )
     summary = (
-        f"I have recovered my memory. I was in an accident where the bridge to the bed and breakfast collapsed while I was trying to cross it. "
-        f"Mable has helped me recover my memory by gently asking questions ... but there is something suspicious about her attitude. "
+        "I have recovered my memory. I was in an accident where the bridge to the bed and breakfast collapsed while I was trying to cross it. "
+        "I feel fine, and though the rental car was totalled, it was also insured. This is not my focus, and I plan to let the insurance company deal with it. "
+        "Mable and Earl Jenner, the prioprietors of the B&B, seem relieved I'm not planning to sue them separately. "
+        "They have promised to let me stay for free for one month, and Earl Jenner has agreed to drive me around town. "
+        "Mable has also helped me recover my memory by gently asking questions ... but there is still something suspicious about her attitude. "
         f"At any rate, I have arrived in {query_town_short(ctx)}\n"
         f"I am here to pursue my next case: {case_name}. {case_summary}.\n"
         f"I have a personal stake in this case: {interest}. "
@@ -393,7 +396,7 @@ def handle_interview_choose_newspaper(ctx: Context, ms: MachineState, cmd: Comma
         invalidate(ctx, "interview", "newspaper")
     if cmd.verb == Verb.CMD_CONFIRM:
         confirm_and_freeze(ctx, ("interview", "newspaper"), ("newspaper",))
-        set_not_hint(ctx, " about petrification or humming ")
+        set_not_hint(ctx, " petrification or humming or being hollowed out or vibration ")
         return Transition(Phase.INTERVIEW_CHOOSE_CASE)
     if cmd.verb == Verb.CMD_NOPE:
         append_not_hint(ctx, query_newspaper(ctx))

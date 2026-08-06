@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from context_resolver.ast.nodes import SequenceNode
+from context_resolver.ast.nodes import SequenceNode, ScalarNode
 from context_resolver.ast.paths import Path
 from context_resolver.ast.resolvable_node import ResolvableNode
 from context_resolver.context.context import Context
 from context_resolver.query.resolver import _resolve_path
 
-from apps.little_house_in_the_eerie.context_access_helpers import fmt
+from apps.little_house_in_the_eerie.context_access_helpers import fmt, set_keyed_node
 
 
 def _unique_preserve_order(values):
@@ -24,6 +24,8 @@ def get_notebook_diary(ctx: Context, idx: int = -1) -> str:
     dates = _unique_preserve_order(date_list)
     if len(dates) <= 0:
         return "Diary empty"
+    idx = min(idx, len(dates)-1)
+    idx = max(idx, -len(dates))
     element = dates[idx]
     entries = ctx.query(Path("notebook", "diary"))
     dated_entries = zip(date_list, entries)
@@ -46,6 +48,8 @@ def get_notebook_log(ctx: Context, idx: int = -1) -> str:
     """Investigator log page."""
     date_list = ctx.query(Path("notebook", "logbook_dates"))
     dates = _unique_preserve_order(date_list)
+    idx = min(idx, len(dates)-1)
+    idx = max(idx, -len(dates))
     element = dates[idx]
     entries = ctx.query(Path("notebook", "logbook"))
     dated_entries = zip(date_list, entries)
@@ -81,7 +85,7 @@ def get_town_summary(ctx: Context) -> str:
     town_data += f"Name: {ctx.query_text('town', 'name')}\n"
     town_data += f"Location: {ctx.query_text('town', 'location')}\n"
     town_data += f"Economics: {ctx.query_text('town', 'economic')}\n"
-    node = ctx.query('locations')
+    node = ctx.query(Path('locations'))
     location_keys = list(node.keys())
     town_data += f"Places: {location_keys}\n"
     old_town_data = ctx.query_text('print_summaries', 'town_data')
@@ -90,10 +94,10 @@ def get_town_summary(ctx: Context) -> str:
     return ctx.query_text('print_summaries', 'town_summary')
 
 def get_location_summary(ctx: Context, search: str) -> str:
-    node = ctx.query('locations')
+    node = ctx.query(Path('locations'))
     best_location = ("", None)
     best_match = 0
-    for (location_key, location_value) in node:
+    for (location_key, location_value) in node.items():
         match = 0
         for i in range(len(search)):
             if i >= len(location_key):
@@ -105,10 +109,15 @@ def get_location_summary(ctx: Context, search: str) -> str:
             best_match = match
     if best_location[1] == None:
         return ""
-    location_text = str(best_location[1])
+    location_node = ctx.query(Path('locations', best_location[0]))
+    location_text = ""
+    for (key, value) in location_node.items():
+        location_text += f"{key}: {ctx.query_text('locations', best_location[0], key)}\n"
     set_keyed_node(ctx, ScalarNode(location_text), 'print_summaries', 'location_data')
     return ctx.query_text('print_summaries', 'location_summary')
 
 def get_scene_summary(ctx: Context) -> str:
     return ctx.query_text("print_summaries", "scene_summary")
 
+def get_vibe_summary(ctx: Context) -> str:
+    return ctx.query_text("print_summaries", "vibe_summary")
