@@ -46,7 +46,7 @@ from context_resolver.ast.schema import SchemaValidationError
 from context_resolver.query.dependency_graph import DependencyGraph, CycleError
 from context_resolver.query.passes import QueryPass, DeterministicPass, ResolutionPass, PassContext
 from context_resolver.inference.provider import ResolutionRequest, ResolutionResult
-from context_resolver.templates.template import Template, TemplateRegistry
+from context_resolver.templates.template import Template, TemplateRegistry, JSONOutputFunction
 
 logger = logging.getLogger(__name__)
 
@@ -191,13 +191,27 @@ class Resolver:
 
         strategy = resolution_pass.strategy
 
+        # Look up the template first so dependency values can be marshaled
+        # appropriately for either prompt rendering or direct function calls.
+        template = node.template or self._template_registry.get(node.template_ref)
+        if template is None:
+            raise ResolutionError(
+                f"Template {node.template_ref!r} not found in registry"
+            )
+
+        use_typed_bindings = isinstance(template, JSONOutputFunction)
+
         # Resolve dependencies.
         bound_values: dict[str, Any] = {}
         for var_name, dep_path in node.input_bindings.items():
             self._dependency_graph.add_dependency(path, dep_path)
             if context is not None:
                 try:
-                    bound_values[var_name] = context.query_text(*dep_path.segments)
+                    if use_typed_bindings:
+                        dep_node = context.query(dep_path)
+                        bound_values[var_name] = _extract_scalar(dep_node)
+                    else:
+                        bound_values[var_name] = context.query_text(*dep_path.segments)
                 except Exception as exc:
                     raise ResolutionError(
                         f"ResolvableNode at {path}: binding '{var_name}' references "
@@ -216,50 +230,56 @@ class Resolver:
                 dep_node = self.resolve_node(dep_node, dep_path, target)
             bound_values[var_name] = _extract_scalar(dep_node)
 
-        # Look up and render the template.
-        template = node.template or self._template_registry.get(node.template_ref)
-        if template is None:
-            raise ResolutionError(
-                f"Template {node.template_ref!r} not found in registry"
+        if isinstance(template, JSONOutputFunction):
+            try:
+                result = ResolutionResult(
+                    data=template.evaluate(bound_values),
+                    provider="python-function",
+                    model="python",
+                )
+            except Exception as exc:
+                node.mark_error(exc)
+                raise ResolutionError(
+                    f"Function evaluation failed for ResolvableNode at {path}: {exc}"
+                ) from exc
+        else:
+            rendered_prompt = template.render(bound_values)
+
+            # Build schema hint.
+            output_schema_dict = (
+                node.output_schema.to_json_schema()
+                if node.output_schema is not None
+                else None
             )
 
-        rendered_prompt = template.render(bound_values)
+            node_metadata = node.metadata
+            temp_hint = node_metadata.get("temperature", 0.0)
+            try:
+                temperature = float(temp_hint)
+            except (TypeError, ValueError):
+                temperature = 0.0
+            extra = node_metadata.get("extra")
+            extra_params = dict(extra) if isinstance(extra, dict) else {}
 
-        # Build schema hint.
-        output_schema_dict = (
-            node.output_schema.to_json_schema()
-            if node.output_schema is not None
-            else None
-        )
+            request = ResolutionRequest(
+                prompt=rendered_prompt,
+                output_schema=output_schema_dict,
+                query_path=path,
+                dependencies=node.effective_dependencies(),
+                metadata=node_metadata,
+                model=node_metadata.get("model") if isinstance(node_metadata.get("model"), str) else None,
+                temperature=temperature,
+                extra=extra_params,
+            )
 
-        node_metadata = node.metadata
-        temp_hint = node_metadata.get("temperature", 0.0)
-        try:
-            temperature = float(temp_hint)
-        except (TypeError, ValueError):
-            temperature = 0.0
-        extra = node_metadata.get("extra")
-        extra_params = dict(extra) if isinstance(extra, dict) else {}
-
-        request = ResolutionRequest(
-            prompt=rendered_prompt,
-            output_schema=output_schema_dict,
-            query_path=path,
-            dependencies=node.effective_dependencies(),
-            metadata=node_metadata,
-            model=node_metadata.get("model") if isinstance(node_metadata.get("model"), str) else None,
-            temperature=temperature,
-            extra=extra_params,
-        )
-
-        # Call the strategy (which delegates to a provider).
-        try:
-            result: ResolutionResult = strategy.resolve(request)
-        except Exception as exc:
-            node.mark_error(exc)
-            raise ResolutionError(
-                f"Resolution failed for ResolvableNode at {path}: {exc}"
-            ) from exc
+            # Call the strategy (which delegates to a provider).
+            try:
+                result = strategy.resolve(request)
+            except Exception as exc:
+                node.mark_error(exc)
+                raise ResolutionError(
+                    f"Resolution failed for ResolvableNode at {path}: {exc}"
+                ) from exc
 
         # Validate the response against the schema.
         if node.output_schema is not None:

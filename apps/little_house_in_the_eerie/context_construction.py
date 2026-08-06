@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from context_resolver.ast.nodes import MappingNode, ScalarNode, SequenceNode
 from context_resolver.ast.resolvable_node import ResolvableNode
-from context_resolver.ast.python_function_node import FunctionNode
 from context_resolver.ast.schema import FieldSpec, Schema
 from context_resolver.context.context import Context
 from context_resolver.inference.llama_cpp_provider import LocalLlamaCppProvider
@@ -11,7 +10,12 @@ from context_resolver.query.passes import ResolutionPass
 from context_resolver.query.resolver import Resolver
 from context_resolver.templates.template import TemplateRegistry
 
-from apps.little_house_in_the_eerie.context_access_helpers import meta_data, simple_schema, template_schema_tuple
+from apps.little_house_in_the_eerie.context_access_helpers import (
+    function_schema,
+    meta_data,
+    simple_schema,
+    template_schema_tuple,
+)
 
 
 PLACE_HOLDER = ScalarNode(None)

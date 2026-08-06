@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import string
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from context_resolver.ast.paths import Path
@@ -281,3 +281,79 @@ class JSONOutputTemplate(Template):
 
     def __repr__(self) -> str:
         return f"JSONOutputTemplate(name={self.name!r}, schema={self._schema.name!r})"
+
+
+class JSONOutputFunction(Template):
+    """
+    A deterministic Template that resolves by executing a Python callable.
+
+    This template type is useful for computed values that should not rely on an
+    LLM (for example, deriving a time-of-day label from numeric fields).
+    """
+
+    def __init__(
+        self,
+        name: str,
+        arglist: list[str],
+        python_fn: Callable[..., Any],
+        schema: "Schema",
+        description: str = "",
+    ) -> None:
+        super().__init__(name=name, template_str="", description=description)
+        self._arglist = list(arglist)
+        self._python_fn = python_fn
+        self._schema = schema
+
+    @property
+    def schema(self) -> "Schema":
+        return self._schema
+
+    @property
+    def arglist(self) -> list[str]:
+        return list(self._arglist)
+
+    def render(self, bindings: dict[str, Any]) -> str:
+        """Not used for function-backed resolution."""
+        return ""
+
+    def infer_input_bindings(self, context: "Context") -> dict[str, "Path"]:
+        from context_resolver.ast.paths import Path
+
+        bindings: dict[str, Path] = {}
+        for arg in self._arglist:
+            candidate = arg.strip()
+            if not candidate:
+                continue
+            path = Path(*candidate.split("."))
+            if context.has_path(path):
+                bindings[candidate] = path
+        return bindings
+
+    def evaluate(self, bindings: dict[str, Any]) -> dict[str, Any]:
+        """Execute the Python function and normalize to a schema-shaped dict."""
+        args: list[Any] = []
+        for arg in self._arglist:
+            if arg not in bindings:
+                raise KeyError(
+                    f"Function template '{self.name}' requires argument {arg!r} "
+                    f"which is not present in bindings: {list(bindings.keys())}"
+                )
+            args.append(bindings[arg])
+
+        result = self._python_fn(*args)
+        if isinstance(result, dict):
+            return result
+
+        if len(self._schema.fields) == 1:
+            return {self._schema.fields[0].name: result}
+
+        raise TypeError(
+            f"Function template '{self.name}' returned non-dict output for "
+            f"multi-field schema '{self._schema.name}'"
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"JSONOutputFunction(name={self.name!r}, schema={self._schema.name!r}, "
+            f"args={self._arglist!r})"
+        )

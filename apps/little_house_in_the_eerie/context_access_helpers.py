@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from enum import Enum, auto
-from typing import Any
+from typing import Any, Callable
 
 from context_resolver.ast.nodes import MappingNode, Node, ScalarNode, SequenceNode, _node_from_dict
 from context_resolver.ast.paths import Path
 from context_resolver.ast.resolvable_node import ResolvableNode, ResolvableNodeState
 from context_resolver.context.context import Context
-from context_resolver.templates.template import JSONOutputTemplate
+from context_resolver.templates.template import JSONOutputTemplate, JSONOutputFunction
 
 
 def fmt(node: Any) -> str:
@@ -203,7 +203,12 @@ def simple_schema(name: str, field_name: str, template_str: str) -> tuple[JSONOu
     )
     return (template, schema)
 
-def function_schema(name: str, field_name: str, function: str, arglist: [str]) -> tuple[JSONOutputFunction, Any]:
+def function_schema(
+    name: str,
+    field_name: str,
+    arglist: list[str],
+    function: Callable[..., Any],
+) -> tuple[JSONOutputFunction, Any]:
     from context_resolver.ast.schema import FieldSpec, Schema
 
     key = name.replace(" ", "")

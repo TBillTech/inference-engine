@@ -11,7 +11,7 @@ from context_resolver.query.passes import ResolutionPass
 from context_resolver.context.context import Context, NodeNotFoundError
 from context_resolver.inference.mock_provider import MockProvider
 from context_resolver.inference.provider import ResolutionProvider, ResolutionResult
-from context_resolver.templates.template import Template, TemplateRegistry
+from context_resolver.templates.template import Template, TemplateRegistry, JSONOutputFunction
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +321,43 @@ class TestContextResolvableNode:
         assert isinstance(second, ScalarNode)
         assert second.value == "A storm cellar under the chapel."
         assert mock.call_count == 2
+
+    def test_function_template_resolves_without_provider_call(self):
+        schema = Schema(
+            name="SunDial",
+            fields=[FieldSpec(name="sun_dial", type="str", required=True)],
+        )
+        sun_template = JSONOutputFunction(
+            name="sun_dial",
+            arglist=["atmosphere.hour_of_day", "atmosphere.post_meridian"],
+            python_fn=lambda hour, pm: "Morning" if not pm else "Evening",
+            schema=schema,
+        )
+        sun_node = ResolvableNode(sun_template, schema)
+        root = MappingNode(
+            {
+                "atmosphere": MappingNode(
+                    {
+                        "hour_of_day": ScalarNode(8),
+                        "post_meridian": ScalarNode(False),
+                        "sun_dial": sun_node,
+                    }
+                )
+            }
+        )
+
+        mock = MockProvider()
+        resolver = Resolver(
+            template_registry=TemplateRegistry(),
+            passes=[ResolutionPass(mock)],
+        )
+        ctx = Context(root=root, resolver=resolver)
+
+        value = ctx.query(Path("atmosphere", "sun_dial", "sun_dial"))
+
+        assert isinstance(value, ScalarNode)
+        assert value.value == "Morning"
+        assert mock.call_count == 0
 
     def test_get_value_descends_into_resolved_result(self, resolvable_context):
         value = resolvable_context.get_value(Path("greeting", "greeting"))

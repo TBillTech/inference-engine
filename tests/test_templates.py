@@ -2,7 +2,12 @@
 
 import pytest
 
-from context_resolver.templates.template import Template, TemplateRegistry, JSONOutputTemplate
+from context_resolver.templates.template import (
+    Template,
+    TemplateRegistry,
+    JSONOutputTemplate,
+    JSONOutputFunction,
+)
 from context_resolver.ast.schema import Schema, FieldSpec
 from context_resolver.ast.nodes import MappingNode, ScalarNode
 from context_resolver.ast.paths import Path
@@ -216,3 +221,68 @@ class TestJSONOutputTemplate:
         rendered = t.render({})
         assert "Respond with a valid JSON object" in rendered
         assert "Output only the JSON object" in rendered
+
+
+class TestJSONOutputFunction:
+    def test_infer_input_bindings_from_arglist(self):
+        schema = Schema(
+            name="SunDial",
+            fields=[FieldSpec(name="sun_dial", type="str", required=True)],
+        )
+        fn = JSONOutputFunction(
+            name="sun",
+            arglist=["atmosphere.hour", "atmosphere.pm"],
+            python_fn=lambda hour, pm: "Morning" if not pm else "Evening",
+            schema=schema,
+        )
+        ctx = Context(
+            MappingNode(
+                {
+                    "atmosphere": MappingNode(
+                        {
+                            "hour": ScalarNode(8),
+                            "pm": ScalarNode(False),
+                        }
+                    )
+                }
+            )
+        )
+
+        bindings = fn.infer_input_bindings(ctx)
+        assert bindings == {
+            "atmosphere.hour": Path("atmosphere", "hour"),
+            "atmosphere.pm": Path("atmosphere", "pm"),
+        }
+
+    def test_evaluate_wraps_single_field_result(self):
+        schema = Schema(
+            name="SunDial",
+            fields=[FieldSpec(name="sun_dial", type="str", required=True)],
+        )
+        fn = JSONOutputFunction(
+            name="sun",
+            arglist=["h"],
+            python_fn=lambda hour: "Morning" if hour < 12 else "Afternoon",
+            schema=schema,
+        )
+
+        out = fn.evaluate({"h": 8})
+        assert out == {"sun_dial": "Morning"}
+
+    def test_evaluate_uses_dict_result_directly(self):
+        schema = Schema(
+            name="Pair",
+            fields=[
+                FieldSpec(name="a", type="int", required=True),
+                FieldSpec(name="b", type="int", required=True),
+            ],
+        )
+        fn = JSONOutputFunction(
+            name="pair",
+            arglist=["x", "y"],
+            python_fn=lambda x, y: {"a": x, "b": y},
+            schema=schema,
+        )
+
+        out = fn.evaluate({"x": 1, "y": 2})
+        assert out == {"a": 1, "b": 2}

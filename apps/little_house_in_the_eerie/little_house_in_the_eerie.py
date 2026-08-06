@@ -20,7 +20,7 @@ import shutil
 import textwrap
 from pathlib import Path as FilePath
 
-from context_resolver.ast.nodes import MappingNode, SequenceNode
+from context_resolver.ast.nodes import MappingNode, Node, SequenceNode, _node_from_dict
 from context_resolver.ast.resolvable_node import ResolvableNode
 from context_resolver.context.context import Context
 
@@ -138,6 +138,27 @@ def _refresh_resolvable_bindings(ctx: Context) -> None:
                 stack.append(node.result)
 
 
+def _backfill_missing_nodes(target: Node, defaults: Node) -> None:
+    """Copy missing keys from *defaults* into *target* recursively."""
+    if isinstance(target, MappingNode) and isinstance(defaults, MappingNode):
+        for key, default_child in defaults.items():
+            existing = target.get(key)
+            if existing is None:
+                target.set(key, _node_from_dict(default_child.to_dict()))
+                continue
+            _backfill_missing_nodes(existing, default_child)
+        return
+
+    if isinstance(target, SequenceNode) and isinstance(defaults, SequenceNode):
+        for i, default_child in enumerate(defaults):
+            if i >= len(target):
+                target.append(_node_from_dict(default_child.to_dict()))
+                continue
+            existing = target.get(i)
+            if existing is not None:
+                _backfill_missing_nodes(existing, default_child)
+
+
 def _load_game(slot: str) -> tuple[Context, Phase]:
     load_path = _save_path(slot)
     with load_path.open("rb") as handle:
@@ -145,6 +166,7 @@ def _load_game(slot: str) -> tuple[Context, Phase]:
 
     fresh_context = build_initial_context()
     loaded_context = Context.from_dict(payload["context"], resolver=fresh_context.resolver)
+    _backfill_missing_nodes(loaded_context.root, fresh_context.root)
     _refresh_resolvable_bindings(loaded_context)
     phase_name = payload.get("phase", Phase.GAME_BEGIN.name)
     phase = Phase[phase_name]
